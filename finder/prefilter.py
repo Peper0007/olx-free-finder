@@ -38,6 +38,10 @@ KEEP_WORDS = [
 ]
 _KEEP_RE = re.compile("|".join(KEEP_WORDS), re.I)
 
+# Parts of the ad URL that mark whole categories to skip (OLX: CID339 = animals, CID139 = kids/baby).
+SKIP_URL_PARTS = ["CID339", "CID139"]
+_SKIP_URL = list(SKIP_URL_PARTS)
+
 
 def _compile(words: list[str]) -> re.Pattern | None:
     good = []
@@ -53,9 +57,12 @@ def _compile(words: list[str]) -> re.Pattern | None:
     return re.compile("|".join(good), re.I) if good else None
 
 
-def configure(skip_words: list[str] | None = None, keep_words: list[str] | None = None) -> None:
+def configure(skip_words: list[str] | None = None, keep_words: list[str] | None = None,
+              skip_url_parts: list[str] | None = None) -> None:
     """Replace the built-in lists (used when the dashboard provides its own)."""
-    global _SKIP_RE, _KEEP_RE
+    global _SKIP_RE, _KEEP_RE, _SKIP_URL
+    if skip_url_parts is not None:
+        _SKIP_URL = [p.strip() for p in skip_url_parts if p and p.strip()]
     if skip_words is not None:
         _SKIP_RE = _compile(skip_words)
     if keep_words is not None:
@@ -63,6 +70,9 @@ def configure(skip_words: list[str] | None = None, keep_words: list[str] | None 
 
 
 def is_junk(ad: Ad) -> bool:
+    url = ad.url or ""
+    if any(part in url for part in _SKIP_URL):
+        return True
     title = ad.title or ""
     if _SKIP_RE is None or not _SKIP_RE.search(title):
         return False

@@ -38,6 +38,7 @@ DEFAULTS: dict = {
     },
     "skip_words": None,  # None → built-in list from prefilter.py
     "keep_words": None,
+    "skip_url_parts": None,  # None → built-in list (OLX animals/kids categories)
 }
 
 _db = None
@@ -100,15 +101,19 @@ def load_settings() -> dict:
                 s = _merge(s, snap.to_dict())
             else:
                 # First run with Firestore: publish defaults so the dashboard shows them.
-                from .prefilter import KEEP_WORDS, SKIP_WORDS
+                from .prefilter import KEEP_WORDS, SKIP_URL_PARTS, SKIP_WORDS
 
                 seed = json.loads(json.dumps(s))
                 seed["skip_words"] = SKIP_WORDS
                 seed["keep_words"] = KEEP_WORDS
+                seed["skip_url_parts"] = SKIP_URL_PARTS
                 ref.set(seed)
                 s = seed
         except Exception as exc:
             log.error("Could not load settings from Firestore: %s", exc)
+    if s.get("skip_url_parts") is None:
+        from .prefilter import SKIP_URL_PARTS
+        s["skip_url_parts"] = SKIP_URL_PARTS
     return s
 
 
