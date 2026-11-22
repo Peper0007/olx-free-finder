@@ -191,6 +191,7 @@ def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
                 "price": str(verdict.get("price", ""))[:100],
                 "price_etsy": str(verdict.get("price_etsy", ""))[:60],
                 "price_ebay": str(verdict.get("price_ebay", ""))[:60],
+                "query_en": str(verdict.get("query_en", ""))[:100],
                 "fingerprint": fingerprint(ad),
                 "pickup": str(verdict.get("pickup", ""))[:100],
                 "sent": sent,

@@ -35,6 +35,7 @@ PROMPT_AD = """
   "why": "почему это продаётся, 1 предложение (по-русски)",
   "price_etsy": "реалистичная цена продажи на Etsy в USD, например '$25–35' (или '—', если не для Etsy)",
   "price_ebay": "реалистичная цена продажи на eBay в EUR, например '€20–30' (или '—', если не для eBay)",
+  "query_en": "короткий поисковый запрос НА АНГЛИЙСКОМ для поиска проданных аналогов на eBay: бренд, модель, тип, эпоха — 2–6 слов, без лишнего (например 'Rotring Isograph 0.20 pen', 'Soviet porcelain figurine LFZ')",
   "pickup": "легко ли забрать: 'отправит курьером' / 'только лично' / 'неизвестно'"
 }}"""
 
@@ -132,6 +133,7 @@ def analyze(ad: Ad, *, model: str | None = None, criteria: str | None = None,
             data["score"] = int(data.get("score", 0))
             pe, pb = str(data.get("price_etsy") or "—"), str(data.get("price_ebay") or "—")
             data["price_etsy"], data["price_ebay"] = pe, pb
+            data["query_en"] = str(data.get("query_en") or "").strip()[:100]
             data["price"] = f"Etsy {pe} · eBay {pb}"
             return data
         except (KeyError, IndexError, ValueError, TypeError) as exc:

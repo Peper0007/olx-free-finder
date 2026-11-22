@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import re
 import os
 
 import requests
@@ -31,6 +32,15 @@ def send_text(text: str) -> None:
     )
 
 
+def price_links(query: str) -> str:
+    """Links to check real prices: eBay sold listings (DE and US) and Etsy search."""
+    from urllib.parse import quote_plus
+    q = quote_plus(query)
+    return (f'<a href="https://www.ebay.de/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1">eBay.de продано</a> · '
+            f'<a href="https://www.ebay.com/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1">eBay.com продано</a> · '
+            f'<a href="https://www.etsy.com/search?q={q}">Etsy</a>')
+
+
 def format_ad(ad: Ad, verdict: dict | None) -> str:
     e = html.escape
     lines = [f"<b>{e(ad.title)}</b>"]
@@ -46,6 +56,8 @@ def format_ad(ad: Ad, verdict: dict | None) -> str:
             lines.append(f"💡 {e(str(verdict['why']))}")
         if verdict.get("pickup"):
             lines.append(f"🚚 {e(str(verdict['pickup']))}")
+        if verdict.get("query_en"):
+            lines.append(f"🔍 Проверить цену: {price_links(str(verdict['query_en']))}")
     meta = " · ".join(x for x in (ad.location, ad.posted, f"доставка: {ad.delivery}" if ad.delivery else "") if x)
     if meta:
         lines.append(f"📍 {e(meta)}")
@@ -56,7 +68,8 @@ def format_ad(ad: Ad, verdict: dict | None) -> str:
 def send_ad(ad: Ad, verdict: dict | None) -> None:
     caption = format_ad(ad, verdict)
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
-    if ad.photos and len(caption) <= 1024:
+    visible = html.unescape(re.sub(r"<[^>]+>", "", caption))  # Telegram's 1024 limit counts text, not markup
+    if ad.photos and len(visible) <= 1024:
         try:
             _call("sendPhoto", chat_id=chat_id, photo=ad.photos[0], caption=caption, parse_mode="HTML")
             return
