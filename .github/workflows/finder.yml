@@ -42,6 +42,9 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          OLX_PAGES: ${{ vars.OLX_PAGES }}
+          BAZAR_PAGES: ${{ vars.BAZAR_PAGES }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           MIN_SCORE: ${{ vars.MIN_SCORE }}
           MAX_AI_PER_RUN: ${{ vars.MAX_AI_PER_RUN }}
