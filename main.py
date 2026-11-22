@@ -1,10 +1,13 @@
-"""Free-stuff finder: OLX.bg + Bazar.bg + Alo.bg → Gemini → Telegram.
+"""Free-stuff finder: OLX.bg + Bazar.bg + Alo.bg → Gemini → Telegram (+ Firestore dashboard).
 
 Usage:
   python main.py                 normal run (used by GitHub Actions)
   python main.py --dry-run       print results instead of sending to Telegram, don't save state
   python main.py --chat-id       print your TELEGRAM_CHAT_ID (write to the bot first)
   python main.py --test          send a test message to Telegram
+
+Settings come from the dashboard (Firestore config/settings) when FIREBASE_SERVICE_ACCOUNT
+is set; otherwise from env vars / built-in defaults (see finder/remote.py).
 """
 from __future__ import annotations
 
@@ -14,71 +17,87 @@ import os
 import sys
 import time
 
-from finder import ai, state, telegram
+from finder import ai, prefilter, remote, state, telegram
 from finder.common import Ad, log
-from finder.prefilter import is_junk
 from finder.sources import alo, bazar, olx
 
 
-def env_int(name: str, default: int) -> int:
-    try:
-        return int(os.environ.get(name) or default)
-    except ValueError:
-        return default
+def collect(settings: dict) -> tuple[list[Ad], dict, list[str]]:
+    src = settings["sources"]
+    plan = []
+    if src["olx"].get("enabled", True):
+        plan.append(("olx", lambda: olx.fetch(int(src["olx"].get("pages", 25)))))
+    if src["bazar"].get("enabled", True):
+        plan.append(("bazar", lambda: bazar.fetch(int(src["bazar"].get("pages", 10)))))
+    if src["alo"].get("enabled", True):
+        plan.append(("alo", lambda: alo.fetch(src["alo"].get("queries") or None)))
 
-
-def collect() -> tuple[list[Ad], list[str]]:
     ads: list[Ad] = []
+    counts: dict[str, int] = {}
     failed: list[str] = []
-    for name, fn in (
-        ("OLX", lambda: olx.fetch(env_int("OLX_PAGES", 25))),
-        ("Bazar.bg", lambda: bazar.fetch(env_int("BAZAR_PAGES", 10))),
-        ("Alo.bg", alo.fetch),
-    ):
+    for name, fn in plan:
         try:
             got = fn()
         except Exception as exc:
             log.exception("%s crashed: %s", name, exc)
             got = []
+        counts[name] = len(got)
         if not got:
             failed.append(name)
         ads.extend(got)
-    # de-duplicate by key, keep first occurrence
     unique: dict[str, Ad] = {}
     for ad in ads:
         unique.setdefault(ad.key, ad)
-    return list(unique.values()), failed
+    return list(unique.values()), counts, failed
 
 
 def run(dry_run: bool) -> int:
-    min_score = env_int("MIN_SCORE", 6)
-    max_ai = env_int("MAX_AI_PER_RUN", 100)
+    settings = remote.load_settings()
+    trigger = "manual" if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" else "schedule"
+    if os.environ.get("GITHUB_EVENT_NAME") is None:
+        trigger = "local"
+
+    if settings.get("paused") and trigger == "schedule":
+        log.info("Bot is paused in the dashboard — skipping scheduled run")
+        return 0
+
+    prefilter.configure(settings.get("skip_words"), settings.get("keep_words"))
+    min_score = int(settings.get("min_score", 6))
+    max_ai = int(settings.get("max_ai_per_run", 100))
+    telegram_on = bool(settings.get("telegram_enabled", True)) and not dry_run
+
+    run_id = None if dry_run else remote.start_run(trigger)
+    stats: dict = {"status": "running", "errors": []}
 
     seen = state.load()
     first_run = not seen
     now = time.time()
-
-    ads, failed = collect()
-    new = [a for a in ads if a.key not in seen]
-    log.info("Collected %s ads, %s new%s", len(ads), len(new), " (first run)" if first_run else "")
-
-    candidates: list[Ad] = []
-    for ad in new:
-        if is_junk(ad):
-            seen[ad.key] = now
-        else:
-            candidates.append(ad)
-    log.info("%s candidates after keyword pre-filter", len(candidates))
-
     sent = analyzed = 0
     try:
+        ads, counts, failed = collect(settings)
+        new = [a for a in ads if a.key not in seen]
+        log.info("Collected %s ads, %s new%s", len(ads), len(new), " (first run)" if first_run else "")
+
+        candidates: list[Ad] = []
+        junk = 0
+        for ad in new:
+            if prefilter.is_junk(ad):
+                seen[ad.key] = now
+                junk += 1
+            else:
+                candidates.append(ad)
+        log.info("%s candidates after keyword pre-filter", len(candidates))
+        stats.update(counts=counts, collected=len(ads), new=len(new), junk=junk,
+                     candidates=len(candidates), failed_sources=failed)
+
         for ad in candidates[:max_ai]:
             if ad.source == "bazar" and ad.needs_details:
                 bazar.enrich(ad)
             try:
-                verdict = ai.analyze(ad)
+                verdict = ai.analyze(ad, model=settings.get("model"), criteria=settings.get("criteria"))
             except ai.QuotaExhausted:
                 log.warning("Gemini daily quota exhausted; the rest waits for the next run")
+                stats["errors"].append("Дневной лимит Gemini исчерпан")
                 break
             analyzed += 1
             if verdict is None:
@@ -86,27 +105,41 @@ def run(dry_run: bool) -> int:
             seen[ad.key] = now
             score = verdict.get("score", 0)
             log.info("[%s/10] %s — %s", score, ad.title, ad.url)
-            if score >= min_score:
+            is_hit = score >= min_score
+            if is_hit:
                 if dry_run:
                     print("\n" + telegram.format_ad(ad, verdict) + "\n")
-                else:
-                    telegram.send_ad(ad, verdict)
-                    time.sleep(1)
+                elif telegram_on:
+                    try:
+                        telegram.send_ad(ad, verdict)
+                        time.sleep(1)
+                    except Exception as exc:
+                        log.error("Telegram send failed: %s", exc)
+                        stats["errors"].append(f"Telegram: {exc}")
                 sent += 1
+            if not dry_run:
+                remote.save_find(ad, verdict, sent=is_hit and telegram_on, run_id=run_id)
+
         if first_run:
-            # Don't drag the whole backlog through the AI over the next days.
             for ad in candidates:
                 seen.setdefault(ad.key, now)
+
+        if len(failed) == len(counts) and counts and telegram_on:
+            telegram.send_text("⚠️ Поиск бесплатных объявлений: ни один сайт не ответил. "
+                               "Возможно, блокировка или сайты изменили вёрстку — проверь логи в GitHub Actions.")
+        elif failed:
+            log.warning("No ads from: %s", ", ".join(failed))
+        stats["status"] = "ok"
+    except Exception as exc:
+        stats["status"] = "failed"
+        stats["errors"].append(f"{type(exc).__name__}: {exc}"[:300])
+        raise
     finally:
         if not dry_run:
             state.save(seen)
-
-    log.info("Done: analyzed %s, sent %s", analyzed, sent)
-    if failed and not dry_run and len(failed) == 3:
-        telegram.send_text("⚠️ Поиск бесплатных объявлений: ни один сайт не ответил. "
-                           "Возможно, блокировка или сайты изменили вёрстку — проверь логи в GitHub Actions.")
-    elif failed:
-        log.warning("No ads from: %s", ", ".join(failed))
+        stats.update(analyzed=analyzed, sent=sent, backlog=max(0, stats.get("candidates", 0) - analyzed))
+        remote.finish_run(run_id, stats)
+        log.info("Done: analyzed %s, sent %s", analyzed, sent)
     return 0
 
 
