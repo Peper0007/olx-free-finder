@@ -33,8 +33,17 @@ def session() -> requests.Session:
     return _session
 
 
+# Optional hook: main.py sets this to report live progress ("which page is being read") to the dashboard.
+on_fetch = None
+
+
 def get(url: str, *, pause: float = 2.0, retries: int = 2, **kwargs) -> requests.Response:
     """GET with a polite pause and a couple of retries on transient errors."""
+    if on_fetch:
+        try:
+            on_fetch(url)
+        except Exception:
+            pass
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
         try:

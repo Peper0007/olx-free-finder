@@ -144,6 +144,25 @@ def finish_run(run_id: str | None, stats: dict) -> None:
         log.error("Firestore finish_run failed: %s", exc)
 
 
+_last_progress = 0.0
+
+
+def progress(run_id: str | None, force: bool = False, **fields) -> None:
+    """Live status for the dashboard. Throttled to one write per ~4 s to stay well inside free Firestore quotas."""
+    global _last_progress
+    db = _client()
+    if db is None or not run_id:
+        return
+    import time as _t
+    if not force and _t.time() - _last_progress < 4:
+        return
+    _last_progress = _t.time()
+    try:
+        db.collection("runs").document(run_id).set({"progress": {**fields, "at": _now()}}, merge=True)
+    except Exception as exc:
+        log.warning("Firestore progress failed: %s", exc)
+
+
 def fingerprint(ad: Ad) -> str:
     from .dedup import fingerprint as fp
     return fp(ad)
