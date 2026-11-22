@@ -35,6 +35,8 @@ PROMPT_AD = """
   "why": "почему это продаётся, 1 предложение (по-русски)",
   "price_etsy": "реалистичная цена продажи на Etsy в USD, например '$25–35' (или '—', если не для Etsy)",
   "price_ebay": "реалистичная цена продажи на eBay в EUR, например '€20–30' (или '—', если не для eBay)",
+  "etsy_ok": true или false — можно ли продавать на Etsy по ИХ правилам: только винтаж (вещи 20+ лет), handmade или материалы для рукоделия; современные фабричные вещи — false,
+  "era": "примерный возраст/эпоха вещи по-русски, например '1970-е, СССР' или 'современная'",
   "query_en": "короткий поисковый запрос НА АНГЛИЙСКОМ для поиска проданных аналогов на eBay: бренд, модель, тип, эпоха — 2–6 слов, без лишнего (например 'Rotring Isograph 0.20 pen', 'Soviet porcelain figurine LFZ')",
   "pickup": "легко ли забрать: 'отправит курьером' / 'только лично' / 'неизвестно'"
 }}"""
@@ -56,7 +58,7 @@ def _image_part(url: str) -> dict | None:
 
 
 def analyze(ad: Ad, *, model: str | None = None, criteria: str | None = None,
-            min_interval: float = 5.0) -> dict | None:
+            examples: str = "", min_interval: float = 5.0) -> dict | None:
     """Returns the parsed JSON verdict, or None on failure."""
     global _last_call, calls
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -69,7 +71,7 @@ def analyze(ad: Ad, *, model: str | None = None, criteria: str | None = None,
 
     parts: list[dict] = [
         {
-            "text": PROMPT_HEAD + criteria + PROMPT_AD.format(
+            "text": PROMPT_HEAD + criteria + (examples or "") + PROMPT_AD.format(
                 source=ad.source,
                 title=ad.title,
                 location=ad.location or "?",
@@ -134,6 +136,9 @@ def analyze(ad: Ad, *, model: str | None = None, criteria: str | None = None,
             pe, pb = str(data.get("price_etsy") or "—"), str(data.get("price_ebay") or "—")
             data["price_etsy"], data["price_ebay"] = pe, pb
             data["query_en"] = str(data.get("query_en") or "").strip()[:100]
+            ok = data.get("etsy_ok")
+            data["etsy_ok"] = ok if isinstance(ok, bool) else str(ok).strip().lower() in ("true", "yes", "да", "1")
+            data["era"] = str(data.get("era") or "").strip()[:60]
             data["price"] = f"Etsy {pe} · eBay {pb}"
             return data
         except (KeyError, IndexError, ValueError, TypeError) as exc:

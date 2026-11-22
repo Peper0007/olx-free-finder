@@ -29,6 +29,8 @@ DEFAULTS: dict = {
     "telegram_enabled": True,
     "min_score": 6,
     "max_ai_per_run": 100,
+    "learn_from_marks": True,   # feed the owner's dashboard marks to the AI as examples
+    "loud_score": 8,            # Telegram: score >= this arrives with sound, lower ones silently
     "model": "gemini-3.5-flash-lite",
     "criteria": DEFAULT_CRITERIA,
     "sources": {
@@ -144,6 +146,46 @@ def finish_run(run_id: str | None, stats: dict) -> None:
         log.error("Firestore finish_run failed: %s", exc)
 
 
+def load_feedback_examples(max_each: int = 12) -> str:
+    """Builds a prompt block from the owner's own marks in the dashboard (taken / interesting vs skip),
+    so the AI calibrates to what this particular reseller actually wants."""
+    db = _client()
+    if db is None:
+        return ""
+    try:
+        docs = [d.to_dict() for d in db.collection("finds")
+                .where("status", "in", ["taken", "interesting", "skip"]).limit(300).stream()]
+    except Exception as exc:
+        log.warning("Firestore feedback load failed: %s", exc)
+        return ""
+
+    def when(d):
+        t = d.get("status_at") or d.get("analyzed_at")
+        try:
+            return t.timestamp()
+        except Exception:
+            return 0
+
+    docs.sort(key=when, reverse=True)
+    good = [d for d in docs if d.get("status") in ("taken", "interesting")][:max_each]
+    bad = [d for d in docs if d.get("status") == "skip"][:max_each]
+    if not good and not bad:
+        return ""
+
+    def line(d):
+        what = (d.get("items") or "").strip()
+        return f"- {d.get('title', '')[:90]}" + (f" ({what[:90]})" if what else "") + f" — ИИ дал {d.get('score', '?')}/10"
+
+    out = ["\n\nОПЫТ ВЛАДЕЛЬЦА — его собственные отметки в дашборде. Подстрой оценки под его вкус:"]
+    if good:
+        out.append("Это он ЗАБРАЛ или отметил «интересно» (похожему ставь оценку выше):")
+        out += [line(d) for d in good]
+    if bad:
+        out.append("Это он отметил «мимо» (похожему ставь оценку ниже, даже если вещь в целом продаётся):")
+        out += [line(d) for d in bad]
+    return "\n".join(out) + "\n"
+
+
 _last_progress = 0.0
 
 
@@ -192,6 +234,9 @@ def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
                 "price_etsy": str(verdict.get("price_etsy", ""))[:60],
                 "price_ebay": str(verdict.get("price_ebay", ""))[:60],
                 "query_en": str(verdict.get("query_en", ""))[:100],
+                "etsy_ok": bool(verdict.get("etsy_ok", False)),
+                "era": str(verdict.get("era", ""))[:60],
+                "posted_at": ad.posted_at or None,
                 "fingerprint": fingerprint(ad),
                 "pickup": str(verdict.get("pickup", ""))[:100],
                 "sent": sent,

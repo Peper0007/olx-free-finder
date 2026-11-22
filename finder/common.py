@@ -71,6 +71,7 @@ class Ad:
     description: str = ""
     photos: list[str] = field(default_factory=list)
     posted: str = ""       # human-readable date/time if known
+    posted_at: float = 0.0  # unix time of publication if known (OLX), 0 = unknown
     delivery: str = ""     # e.g. "купувача, лично предаване"
     needs_details: bool = False  # True if description/photos should be fetched from the ad page
 

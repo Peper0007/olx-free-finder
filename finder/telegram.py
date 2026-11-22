@@ -4,6 +4,7 @@ from __future__ import annotations
 import html
 import re
 import os
+import time
 
 import requests
 
@@ -22,13 +23,14 @@ def _call(method: str, **payload) -> dict:
     return data
 
 
-def send_text(text: str) -> None:
+def send_text(text: str, silent: bool = False) -> None:
     _call(
         "sendMessage",
         chat_id=os.environ["TELEGRAM_CHAT_ID"],
         text=text,
         parse_mode="HTML",
         disable_web_page_preview=True,
+        disable_notification=silent,
     )
 
 
@@ -41,11 +43,33 @@ def price_links(query: str) -> str:
             f'<a href="https://www.etsy.com/search?q={q}">Etsy</a>')
 
 
+def age_text(ad: Ad) -> str:
+    if ad.posted_at:
+        mins = max(0, int((time.time() - ad.posted_at) / 60))
+        if mins < 1:
+            return "только что"
+        if mins < 60:
+            return f"{mins} мин назад"
+        if mins < 48 * 60:
+            return f"{mins // 60} ч {mins % 60} мин назад" if mins < 6 * 60 else f"{mins // 60} ч назад"
+        return f"{mins // 1440} дн назад"
+    return ad.posted or ""
+
+
+def seller_message(ad: Ad) -> str:
+    return (f"Здравейте! Още ли е налично „{ad.title[:80]}“? "
+            "Мога да мина да го взема днес или утре, когато Ви е удобно. Благодаря!")
+
+
 def format_ad(ad: Ad, verdict: dict | None) -> str:
     e = html.escape
     lines = [f"<b>{e(ad.title)}</b>"]
     if verdict:
-        lines.append(f"⭐ {verdict.get('score', '?')}/10")
+        age = age_text(ad)
+        lines.append(f"⭐ {verdict.get('score', '?')}/10" + (f" · 🕐 опубликовано {e(age)}" if age else ""))
+        if "etsy_ok" in verdict:
+            era = f" ({e(str(verdict['era']))})" if verdict.get("era") else ""
+            lines.append(("🏷 Etsy ✅ винтаж/handmade" if verdict["etsy_ok"] else "🏷 только eBay — для Etsy не подходит") + era)
         if verdict.get("price_etsy") or verdict.get("price_ebay"):
             lines.append(f"💰 Etsy: {e(str(verdict.get('price_etsy', '—')))} · eBay: {e(str(verdict.get('price_ebay', '—')))}")
         elif verdict.get("price"):
@@ -62,20 +86,23 @@ def format_ad(ad: Ad, verdict: dict | None) -> str:
     if meta:
         lines.append(f"📍 {e(meta)}")
     lines.append(f'<a href="{e(ad.url)}">Открыть на {SOURCE_NAMES.get(ad.source, ad.source)}</a>')
+    if verdict:
+        lines.append(f"✉️ Продавцу (нажми, чтобы скопировать):\n<code>{e(seller_message(ad))}</code>")
     return "\n".join(lines)
 
 
-def send_ad(ad: Ad, verdict: dict | None) -> None:
+def send_ad(ad: Ad, verdict: dict | None, silent: bool = False) -> None:
     caption = format_ad(ad, verdict)
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
     visible = html.unescape(re.sub(r"<[^>]+>", "", caption))  # Telegram's 1024 limit counts text, not markup
     if ad.photos and len(visible) <= 1024:
         try:
-            _call("sendPhoto", chat_id=chat_id, photo=ad.photos[0], caption=caption, parse_mode="HTML")
+            _call("sendPhoto", chat_id=chat_id, photo=ad.photos[0], caption=caption, parse_mode="HTML",
+                  disable_notification=silent)
             return
         except Exception as exc:  # e.g. Telegram can't fetch the image URL
             log.warning("sendPhoto failed (%s), falling back to text", exc)
-    send_text(caption)
+    send_text(caption, silent=silent)
 
 
 def print_chat_ids() -> None:
