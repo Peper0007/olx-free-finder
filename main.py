@@ -17,13 +17,13 @@ import os
 import sys
 import time
 
-from finder import ai, prefilter, remote, state, telegram
+from finder import ai, common, prefilter, remote, state, telegram
 from finder.dedup import fingerprint
 from finder.common import Ad, log
 from finder.sources import alo, bazar, olx
 
 
-def collect(settings: dict) -> tuple[list[Ad], dict, list[str]]:
+def collect(settings: dict, report=lambda **kw: None) -> tuple[list[Ad], dict, list[str]]:
     src = settings["sources"]
     plan = []
     if src["olx"].get("enabled", True):
@@ -36,7 +36,8 @@ def collect(settings: dict) -> tuple[list[Ad], dict, list[str]]:
     ads: list[Ad] = []
     counts: dict[str, int] = {}
     failed: list[str] = []
-    for name, fn in plan:
+    for i, (name, fn) in enumerate(plan, 1):
+        report(phase="collect", source=name, step=f"{i}/{len(plan)}", collected=len(ads))
         try:
             got = fn()
         except Exception as exc:
@@ -74,8 +75,25 @@ def run(dry_run: bool) -> int:
     first_run = not seen
     now = time.time()
     sent = analyzed = 0
+    cur = {"source": ""}
+
+    def report(force: bool = False, **fields):
+        if "source" in fields:
+            cur["source"] = fields["source"]
+        remote.progress(run_id, force=force, **fields)
+
+    def on_fetch(url: str):
+        page = ""
+        m = __import__("re").search(r"[?&]page=(\d+)", url)
+        if m:
+            page = m.group(1)
+        report(phase="collect", source=cur["source"], url=url, page=page)
+
+    common.on_fetch = on_fetch
     try:
-        ads, counts, failed = collect(settings)
+        report(force=True, phase="start")
+        ads, counts, failed = collect(settings, report)
+        common.on_fetch = None
         new = [a for a in ads if a.key not in seen]
         log.info("Collected %s ads, %s new%s", len(ads), len(new), " (first run)" if first_run else "")
 
@@ -99,7 +117,12 @@ def run(dry_run: bool) -> int:
         stats.update(counts=counts, collected=len(ads), new=len(new), junk=junk, duplicates=dups,
                      candidates=len(candidates), failed_sources=failed)
 
-        for ad in candidates[:max_ai]:
+        todo = candidates[:max_ai]
+        report(force=True, phase="filter", collected=len(ads), new=len(new), junk=junk, duplicates=dups,
+               candidates=len(candidates), todo=len(todo))
+        for i, ad in enumerate(todo, 1):
+            report(phase="analyze", done=i - 1, todo=len(todo), source=ad.source, title=ad.title[:120],
+                   url=ad.url, hits=sent)
             if ad.source == "bazar" and ad.needs_details:
                 bazar.enrich(ad)
             try:
