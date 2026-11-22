@@ -18,6 +18,7 @@ import sys
 import time
 
 from finder import ai, prefilter, remote, state, telegram
+from finder.dedup import fingerprint
 from finder.common import Ad, log
 from finder.sources import alo, bazar, olx
 
@@ -79,15 +80,23 @@ def run(dry_run: bool) -> int:
         log.info("Collected %s ads, %s new%s", len(ads), len(new), " (first run)" if first_run else "")
 
         candidates: list[Ad] = []
-        junk = 0
+        junk = dups = 0
+        batch_fps: set[str] = set()
         for ad in new:
             if prefilter.is_junk(ad):
                 seen[ad.key] = now
                 junk += 1
-            else:
-                candidates.append(ad)
-        log.info("%s candidates after keyword pre-filter", len(candidates))
-        stats.update(counts=counts, collected=len(ads), new=len(new), junk=junk,
+                continue
+            fp = fingerprint(ad)
+            if fp in seen or fp in batch_fps:
+                # same item already analyzed (reposted with a new id or listed on another site)
+                seen[ad.key] = now
+                dups += 1
+                continue
+            batch_fps.add(fp)
+            candidates.append(ad)
+        log.info("%s candidates after keyword pre-filter (%s junk, %s duplicates)", len(candidates), junk, dups)
+        stats.update(counts=counts, collected=len(ads), new=len(new), junk=junk, duplicates=dups,
                      candidates=len(candidates), failed_sources=failed)
 
         for ad in candidates[:max_ai]:
@@ -103,6 +112,7 @@ def run(dry_run: bool) -> int:
             if verdict is None:
                 continue  # transient failure: retry next run
             seen[ad.key] = now
+            seen[fingerprint(ad)] = now
             score = verdict.get("score", 0)
             log.info("[%s/10] %s — %s", score, ad.title, ad.url)
             is_hit = score >= min_score
