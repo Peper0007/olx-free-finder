@@ -61,7 +61,7 @@ def run(dry_run: bool) -> int:
         log.info("Bot is paused in the dashboard — skipping scheduled run")
         return 0
 
-    prefilter.configure(settings.get("skip_words"), settings.get("keep_words"))
+    prefilter.configure(settings.get("skip_words"), settings.get("keep_words"), settings.get("skip_url_parts"))
     min_score = int(settings.get("min_score", 6))
     max_ai = int(settings.get("max_ai_per_run", 100))
     telegram_on = bool(settings.get("telegram_enabled", True)) and not dry_run
