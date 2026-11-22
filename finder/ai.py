@@ -33,7 +33,8 @@ PROMPT_AD = """
   "score": целое 0-10 (10 = точно стоит забирать ради Etsy/eBay, 0 = мусор),
   "items": "что именно ценного видно (по-русски, коротко)",
   "why": "почему это продаётся, 1 предложение (по-русски)",
-  "price": "реалистичная цена продажи на Etsy/eBay, например '$20–40' или '€15 за набор'",
+  "price_etsy": "реалистичная цена продажи на Etsy в USD, например '$25–35' (или '—', если не для Etsy)",
+  "price_ebay": "реалистичная цена продажи на eBay в EUR, например '€20–30' (или '—', если не для eBay)",
   "pickup": "легко ли забрать: 'отправит курьером' / 'только лично' / 'неизвестно'"
 }}"""
 
@@ -127,6 +128,9 @@ def analyze(ad: Ad, *, model: str | None = None, criteria: str | None = None,
             if isinstance(data, list):
                 data = data[0] if data else {}
             data["score"] = int(data.get("score", 0))
+            pe, pb = str(data.get("price_etsy") or "—"), str(data.get("price_ebay") or "—")
+            data["price_etsy"], data["price_ebay"] = pe, pb
+            data["price"] = f"Etsy {pe} · eBay {pb}"
             return data
         except (KeyError, IndexError, ValueError, TypeError) as exc:
             log.warning("Gemini answer not parsed for %s: %s", ad.key, exc)

@@ -35,7 +35,11 @@ def format_ad(ad: Ad, verdict: dict | None) -> str:
     e = html.escape
     lines = [f"<b>{e(ad.title)}</b>"]
     if verdict:
-        lines.append(f"⭐ {verdict.get('score', '?')}/10 · 💰 {e(str(verdict.get('price', '?')))}")
+        lines.append(f"⭐ {verdict.get('score', '?')}/10")
+        if verdict.get("price_etsy") or verdict.get("price_ebay"):
+            lines.append(f"💰 Etsy: {e(str(verdict.get('price_etsy', '—')))} · eBay: {e(str(verdict.get('price_ebay', '—')))}")
+        elif verdict.get("price"):
+            lines.append(f"💰 {e(str(verdict['price']))}")
         if verdict.get("items"):
             lines.append(f"🔎 {e(str(verdict['items']))}")
         if verdict.get("why"):
@@ -66,11 +70,13 @@ def print_chat_ids() -> None:
     data = _call("getUpdates")
     found = {}
     for upd in data.get("result", []):
-        msg = upd.get("message") or upd.get("edited_message") or {}
+        msg = (upd.get("message") or upd.get("edited_message") or upd.get("channel_post")
+               or upd.get("edited_channel_post") or (upd.get("my_chat_member") or {}))
         chat = msg.get("chat") or {}
         if chat.get("id"):
-            found[chat["id"]] = chat.get("first_name") or chat.get("title") or ""
+            kind = "канал" if chat.get("type") == "channel" else chat.get("type", "")
+            found[chat["id"]] = f'{chat.get("title") or chat.get("first_name") or ""} [{kind}]'
     if not found:
-        print("Нет сообщений. Напиши боту в Telegram любое слово и запусти ещё раз.")
+        print("Нет сообщений. Напиши боту (или опубликуй пост в канале, где бот — админ) и запусти ещё раз.")
     for cid, name in found.items():
         print(f"TELEGRAM_CHAT_ID = {cid}   ({name})")

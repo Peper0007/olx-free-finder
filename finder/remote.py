@@ -144,6 +144,11 @@ def finish_run(run_id: str | None, stats: dict) -> None:
         log.error("Firestore finish_run failed: %s", exc)
 
 
+def fingerprint(ad: Ad) -> str:
+    from .dedup import fingerprint as fp
+    return fp(ad)
+
+
 def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
     db = _client()
     if db is None:
@@ -165,6 +170,9 @@ def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
                 "items": str(verdict.get("items", ""))[:500],
                 "why": str(verdict.get("why", ""))[:500],
                 "price": str(verdict.get("price", ""))[:100],
+                "price_etsy": str(verdict.get("price_etsy", ""))[:60],
+                "price_ebay": str(verdict.get("price_ebay", ""))[:60],
+                "fingerprint": fingerprint(ad),
                 "pickup": str(verdict.get("pickup", ""))[:100],
                 "sent": sent,
                 "analyzed_at": _now(),
