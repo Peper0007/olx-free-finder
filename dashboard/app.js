@@ -426,13 +426,16 @@ function renderLimits() {
   const perRun = Math.max(1, backlogOn ? maxAi : Math.min(maxAi, avgCalls || 1));
   const today = limitRuns.filter((r) => ms(r.started_at) >= +reset);
   const used = today.reduce((a, r) => a + (r.status === "running" ? perRun : (r.ai_calls ?? r.analyzed ?? 0)), 0);
-  const left = Math.max(0, rpd - used);
+  // If Gemini itself said the daily quota is gone, trust that over our own count
+  // (requests made outside the dashboard's log — older runs, AI Studio — also count).
+  const exhausted = today.some((r) => (r.errors || []).some((x) => /лимит Gemini/i.test(x)));
+  const left = exhausted ? 0 : Math.max(0, rpd - used);
   const sched = scheduledBetween(now, nextReset);
   const reserve = sched * perRun;
   const manual = Math.max(0, Math.floor((left - reserve) / perRun));
   const manualNoSched = Math.floor(left / perRun);
   $("#lim-gemini").innerHTML = `
-    <div class="lim-big">${used} / ${rpd}</div>${bar(used, rpd)}
+    <div class="lim-big">${exhausted ? `исчерпан до ${fmtTime(nextReset)}` : `${used} / ${rpd}`}</div>${bar(exhausted ? rpd : used, rpd)}
     <div class="lim-answer">Можно запустить вручную ещё <b>${manual}</b> раз(а) до сброса
       ${manual === 0 && manualNoSched > 0 ? `<br><span class="small muted">или ${manualNoSched}, если не оставлять запас на запуски по расписанию — тогда они упрутся в лимит</span>` : ""}</div>
     <div class="lim-rows">
@@ -472,7 +475,7 @@ function renderLimits() {
   const pc = (a, b) => (a / b > 0.9 ? "bad" : a / b > 0.7 ? "mid" : "");
   const strip = $("#lim-strip");
   if (strip) strip.innerHTML = `
-    <span class="${pc(used, rpd)}">ИИ (Gemini): <b>${used} / ${rpd}</b> за сутки, осталось ${left}, сброс ${nextReset.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
+    <span class="${exhausted ? "bad" : pc(used, rpd)}">ИИ (Gemini): <b>${exhausted ? "лимит исчерпан" : `${used} / ${rpd}`}</b> за сутки, осталось ${left}, сброс ${nextReset.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
     <span class="${pc(usedMin, ghLimit)}">GitHub: <b>${usedMin} / ${ghLimit}</b> мин за месяц</span>
     <span>Ручных запусков можно: <b>${Math.min(manual, ghManual)}</b> сегодня</span>
     <a href="#" data-goto="limits">подробнее</a>`;
