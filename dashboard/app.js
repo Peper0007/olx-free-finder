@@ -98,6 +98,8 @@ function fillForms() {
   setChk("#s-telegram", s.telegram_enabled !== false);
   setVal("#s-min", s.min_score); if ($("#s-min-val")) $("#s-min-val").textContent = s.min_score;
   setVal("#s-maxai", s.max_ai_per_run);
+  setChk("#s-learn", s.learn_from_marks !== false);
+  setVal("#s-loud", s.loud_score ?? 8);
   setVal("#s-model", s.model);
   setChk("#s-olx", s.sources.olx.enabled); setVal("#s-olx-pages", s.sources.olx.pages);
   setChk("#s-bazar", s.sources.bazar.enabled); setVal("#s-bazar-pages", s.sources.bazar.pages);
@@ -126,6 +128,8 @@ async function save(part) {
       telegram_enabled: $("#s-telegram").checked,
       min_score: +$("#s-min").value,
       max_ai_per_run: Math.max(1, Math.min(200, +$("#s-maxai").value || 100)),
+      learn_from_marks: $("#s-learn").checked,
+      loud_score: Math.max(0, Math.min(11, +$("#s-loud").value || 8)),
       model: $("#s-model").value.trim() || DEFAULTS.model,
       sources: {
         olx: { enabled: $("#s-olx").checked, pages: Math.max(1, Math.min(25, +$("#s-olx-pages").value || 25)) },
@@ -176,7 +180,7 @@ function subscribeFinds() {
   }, (e) => toast("Ошибка загрузки находок: " + e.message, true));
 }
 $("#f-limit").onchange = subscribeFinds;
-["#f-score", "#f-source", "#f-status", "#f-search"].forEach((s) => ($(s).oninput = () => {
+["#f-score", "#f-source", "#f-status", "#f-search", "#f-platform"].forEach((s) => ($(s).oninput = () => {
   todayOnly = false; $("#f-score-val").textContent = $("#f-score").value; renderFinds();
 }));
 
@@ -195,10 +199,10 @@ function priceLinks(query) {
 }
 
 function renderFinds() {
-  const minS = +$("#f-score").value, src = $("#f-source").value, st = $("#f-status").value;
+  const minS = +$("#f-score").value, src = $("#f-source").value, st = $("#f-status").value, plat = $("#f-platform").value;
   const q = $("#f-search").value.trim().toLowerCase();
   const list = finds.filter((f) =>
-    (f.score ?? 0) >= minS && (!todayOnly || f.analyzed_at?.toDate?.().toDateString() === new Date().toDateString()) && (!src || f.source === src) && (!st || (f.status || "new") === st) &&
+    (f.score ?? 0) >= minS && (!todayOnly || f.analyzed_at?.toDate?.().toDateString() === new Date().toDateString()) && (!src || f.source === src) && (!plat || (plat === "etsy" ? f.etsy_ok === true : f.etsy_ok === false)) && (!st || (f.status || "new") === st) &&
     (!q || `${f.title} ${f.location} ${f.items}`.toLowerCase().includes(q)));
 
   const today = new Date().toDateString();
@@ -224,9 +228,12 @@ function renderFinds() {
         ${f.items ? `<p>🔎 ${esc(f.items)}</p>` : ""}
         ${f.why ? `<p class="muted">💡 ${esc(f.why)}</p>` : ""}
         <p class="price">💰 ${f.price_etsy || f.price_ebay ? `Etsy <b>${esc(f.price_etsy || "—")}</b> · eBay <b>${esc(f.price_ebay || "—")}</b>` : esc(f.price || "—")}</p>
+        ${"etsy_ok" in f ? `<p class="plat ${f.etsy_ok ? "etsy" : "ebay"}">🏷 ${f.etsy_ok ? "Etsy ✅ винтаж/handmade" : "только eBay"}${f.era ? ` · ${esc(f.era)}` : ""}</p>` : ""}
         <p class="checks">🔍 ${priceLinks(f.query_en || f.title)}${f.query_en ? ` <span class="muted small">«${esc(f.query_en)}»</span>` : ""}</p>
         <p class="meta">🚚 ${esc(f.pickup || "—")}</p>
-        <p class="meta">📍 ${esc(f.location || "?")} · ${SOURCE_NAMES[f.source] || f.source} · ${fmtDate(f.analyzed_at)}</p>
+        <p class="meta">📍 ${esc(f.location || "?")} · ${SOURCE_NAMES[f.source] || f.source}</p>
+        <p class="meta">🕐 опубликовано ${f.posted_at ? ago(f.posted_at * 1000) : esc(f.posted || "?")} · оценено ${fmtDate(f.analyzed_at)}</p>
+        <button class="btn small copy" data-copy="${esc(f.id)}">✉️ Скопировать текст продавцу</button>
         <div class="status">
           ${Object.entries(STATUS).map(([k, v]) => `<button data-id="${esc(f.id)}" data-st="${k}" class="${(f.status || "new") === k ? "on" : ""}">${v}</button>`).join("")}
         </div>
@@ -256,9 +263,17 @@ $("#stats").addEventListener("click", (e) => {
   renderFinds();
 });
 $("#finds").addEventListener("click", async (e) => {
+  const c = e.target.closest("button[data-copy]");
+  if (c) {
+    const f = finds.find((x) => x.id === c.dataset.copy);
+    const text = `Здравейте! Още ли е налично „${(f?.title || "").slice(0, 80)}“? Мога да мина да го взема днес или утре, когато Ви е удобно. Благодаря!`;
+    try { await navigator.clipboard.writeText(text); toast("Текст скопирован — вставь его в чат с продавцом."); }
+    catch { prompt("Скопируй текст:", text); }
+    return;
+  }
   const b = e.target.closest("button[data-st]");
   if (!b) return;
-  try { await updateDoc(doc(db, "finds", b.dataset.id), { status: b.dataset.st }); }
+  try { await updateDoc(doc(db, "finds", b.dataset.id), { status: b.dataset.st, status_at: new Date() }); }
   catch (err) { toast("Не удалось сменить статус: " + err.message, true); }
 });
 

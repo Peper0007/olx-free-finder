@@ -130,3 +130,7 @@ table.runs { width: 100%; border-collapse: collapse; margin-top: 16px; backgroun
 
 .find .checks { font-size: 12px; margin: 4px 0; }
 .find .checks a { color: var(--accent); }
+
+.find .plat { font-size: 12px; margin: 4px 0; font-weight: 600; }
+.find .plat.etsy { color: #f1641e; } .find .plat.ebay { color: #5ba3ff; }
+.find .copy { margin: 6px 0 2px; }

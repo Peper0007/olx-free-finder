@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Free Finder — дашборд</title>
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
   <!-- Login -->
@@ -55,6 +55,9 @@
               <option value="taken">забрал</option><option value="skip">мимо</option>
             </select>
           </label>
+          <label>Площадка
+            <select id="f-platform"><option value="">все</option><option value="etsy">Etsy-винтаж</option><option value="ebay">только eBay</option></select>
+          </label>
           <input id="f-search" type="search" placeholder="Поиск по названию, городу…">
           <label>Показать
             <select id="f-limit"><option>100</option><option selected>300</option><option>1000</option></select>
@@ -77,6 +80,12 @@
             <label>Сколько объявлений отдавать ИИ за запуск
               <input id="s-maxai" type="number" min="1" max="200">
               <span class="hint">Бесплатный лимит Gemini — 500 запросов в день, запусков 4 в день (+ ручные).</span>
+            </label>
+            <label class="switch"><input id="s-learn" type="checkbox"> Учиться на моих отметках («забрал», «интересно», «мимо»)</label>
+            <span class="hint">ИИ видит ваши последние отметки как примеры и подстраивает оценки под ваш вкус.</span>
+            <label>Со звуком в Telegram — от оценки
+              <input id="s-loud" type="number" min="0" max="11">
+              <span class="hint">Находки ниже этой оценки приходят без звука. 11 = всё без звука.</span>
             </label>
             <label>Модель Gemini
               <input id="s-model" list="models">
@@ -178,6 +187,6 @@
     </main>
   </div>
 
-  <script type="module" src="app.js?v=9"></script>
+  <script type="module" src="app.js?v=10"></script>
 </body>
 </html>
