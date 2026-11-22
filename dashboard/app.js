@@ -48,9 +48,13 @@ onAuthStateChanged(auth, async (user) => {
   try {
     await loadSettings();
   } catch (e) {
-    $("#login-error").textContent = "Нет доступа для " + user.email + ". Дашборд открыт только владельцу.";
-    await signOut(auth);
-    return;
+    if (e?.code === "permission-denied") {
+      $("#login-error").textContent = "Нет доступа для " + user.email + ". Дашборд открыт только владельцу.";
+      await signOut(auth);
+      return;
+    }
+    console.error(e);
+    toast("Ошибка загрузки настроек: " + (e?.message || e) + " — обнови страницу (Ctrl+F5).", true);
   }
   $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
   subscribeFinds(); subscribeRuns(); renderGhState();
@@ -80,23 +84,26 @@ async function loadSettings() {
   fillForms();
 }
 
-function lines(text) { return text.split("\n").map((s) => s.trim()).filter(Boolean); }
+function lines(text) { return String(text ?? "").split("\n").map((s) => s.trim()).filter(Boolean); }
+function setVal(sel, v) { const el = $(sel); if (el) el.value = v ?? ""; }
+function setChk(sel, v) { const el = $(sel); if (el) el.checked = !!v; }
+function getVal(sel) { return $(sel)?.value ?? ""; }
 
 function fillForms() {
   const s = settings;
-  $("#s-paused").checked = !!s.paused;
-  $("#s-telegram").checked = s.telegram_enabled !== false;
-  $("#s-min").value = s.min_score; $("#s-min-val").textContent = s.min_score;
-  $("#s-maxai").value = s.max_ai_per_run;
-  $("#s-model").value = s.model;
-  $("#s-olx").checked = s.sources.olx.enabled; $("#s-olx-pages").value = s.sources.olx.pages;
-  $("#s-bazar").checked = s.sources.bazar.enabled; $("#s-bazar-pages").value = s.sources.bazar.pages;
-  $("#s-alo").checked = s.sources.alo.enabled; $("#s-alo-q").value = (s.sources.alo.queries || []).join("\n");
-  $("#w-skip").value = (s.skip_words || []).join("\n");
-  $("#w-keep").value = (s.keep_words || []).join("\n");
-  $("#w-url").value = (s.skip_url_parts || []).join("\n");
-  $("#c-text").value = s.criteria;
-  $("#f-score").value = s.min_score; $("#f-score-val").textContent = s.min_score;
+  setChk("#s-paused", s.paused);
+  setChk("#s-telegram", s.telegram_enabled !== false);
+  setVal("#s-min", s.min_score); if ($("#s-min-val")) $("#s-min-val").textContent = s.min_score;
+  setVal("#s-maxai", s.max_ai_per_run);
+  setVal("#s-model", s.model);
+  setChk("#s-olx", s.sources.olx.enabled); setVal("#s-olx-pages", s.sources.olx.pages);
+  setChk("#s-bazar", s.sources.bazar.enabled); setVal("#s-bazar-pages", s.sources.bazar.pages);
+  setChk("#s-alo", s.sources.alo.enabled); setVal("#s-alo-q", (s.sources.alo.queries || []).join("\n"));
+  setVal("#w-skip", (s.skip_words || []).join("\n"));
+  setVal("#w-keep", (s.keep_words || []).join("\n"));
+  setVal("#w-url", (s.skip_url_parts || []).join("\n"));
+  setVal("#c-text", s.criteria);
+  setVal("#f-score", s.min_score); if ($("#f-score-val")) $("#f-score-val").textContent = s.min_score;
   renderBotState();
 }
 $("#s-min").oninput = (e) => ($("#s-min-val").textContent = e.target.value);
@@ -123,7 +130,7 @@ async function save(part) {
       },
     };
   } else if (part === "filters") {
-    patch = { skip_words: lines($("#w-skip").value), keep_words: lines($("#w-keep").value), skip_url_parts: lines($("#w-url").value) };
+    patch = { skip_words: lines(getVal("#w-skip")), keep_words: lines(getVal("#w-keep")), skip_url_parts: lines(getVal("#w-url")) };
   } else {
     patch = { criteria: $("#c-text").value.trim() || DEFAULTS.criteria };
   }
