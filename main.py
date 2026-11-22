@@ -117,6 +117,15 @@ def run(dry_run: bool) -> int:
         stats.update(counts=counts, collected=len(ads), new=len(new), junk=junk, duplicates=dups,
                      candidates=len(candidates), failed_sources=failed)
 
+        # Free stuff goes fast: analyze the freshest ads first (OLX has exact time, Bazar says "днес").
+        def freshness(ad: Ad) -> float:
+            if ad.posted_at:
+                return ad.posted_at
+            return now - 3600 if "днес" in (ad.posted or "").lower() else 0.0
+        candidates.sort(key=freshness, reverse=True)
+        examples = remote.load_feedback_examples() if settings.get("learn_from_marks", True) else ""
+        if examples:
+            log.info("Using owner feedback examples (%s lines)", examples.count("\n- "))
         todo = candidates[:max_ai]
         report(force=True, phase="filter", collected=len(ads), new=len(new), junk=junk, duplicates=dups,
                candidates=len(candidates), todo=len(todo))
@@ -126,7 +135,8 @@ def run(dry_run: bool) -> int:
             if ad.source == "bazar" and ad.needs_details:
                 bazar.enrich(ad)
             try:
-                verdict = ai.analyze(ad, model=settings.get("model"), criteria=settings.get("criteria"))
+                verdict = ai.analyze(ad, model=settings.get("model"), criteria=settings.get("criteria"),
+                                     examples=examples)
             except ai.QuotaExhausted:
                 log.warning("Gemini daily quota exhausted; the rest waits for the next run")
                 stats["errors"].append("Дневной лимит Gemini исчерпан")
@@ -144,7 +154,7 @@ def run(dry_run: bool) -> int:
                     print("\n" + telegram.format_ad(ad, verdict) + "\n")
                 elif telegram_on:
                     try:
-                        telegram.send_ad(ad, verdict)
+                        telegram.send_ad(ad, verdict, silent=score < int(settings.get("loud_score", 8)))
                         time.sleep(1)
                     except Exception as exc:
                         log.error("Telegram send failed: %s", exc)
