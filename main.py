@@ -147,7 +147,7 @@ def run(dry_run: bool) -> int:
     finally:
         if not dry_run:
             state.save(seen)
-        stats.update(analyzed=analyzed, sent=sent, backlog=max(0, stats.get("candidates", 0) - analyzed))
+        stats.update(analyzed=analyzed, sent=sent, ai_calls=ai.calls, model=settings.get("model"), backlog=max(0, stats.get("candidates", 0) - analyzed))
         remote.finish_run(run_id, stats)
         log.info("Done: analyzed %s, sent %s", analyzed, sent)
     return 0
