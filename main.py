@@ -31,8 +31,8 @@ def collect() -> tuple[list[Ad], list[str]]:
     ads: list[Ad] = []
     failed: list[str] = []
     for name, fn in (
-        ("OLX", lambda: olx.fetch(env_int("OLX_PAGES", 5))),
-        ("Bazar.bg", lambda: bazar.fetch(env_int("BAZAR_PAGES", 3))),
+        ("OLX", lambda: olx.fetch(env_int("OLX_PAGES", 25))),
+        ("Bazar.bg", lambda: bazar.fetch(env_int("BAZAR_PAGES", 10))),
         ("Alo.bg", alo.fetch),
     ):
         try:
@@ -52,7 +52,7 @@ def collect() -> tuple[list[Ad], list[str]]:
 
 def run(dry_run: bool) -> int:
     min_score = env_int("MIN_SCORE", 6)
-    max_ai = env_int("MAX_AI_PER_RUN", 60)
+    max_ai = env_int("MAX_AI_PER_RUN", 100)
 
     seen = state.load()
     first_run = not seen
