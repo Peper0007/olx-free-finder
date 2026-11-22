@@ -9,12 +9,12 @@ jobs:
   unpack:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: |
           test -f bundle.zip || exit 0
           rm -f README.md
-          unzip -o bundle.zip
-          rm bundle.zip .github/workflows/unpack.yml
+          unzip -o bundle.zip -x '.github/*'
+          rm bundle.zip
           git config user.name finder-bot
           git config user.email finder-bot@users.noreply.github.com
           git add -A
