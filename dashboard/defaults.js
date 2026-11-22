@@ -120,5 +120,9 @@ export const DEFAULTS = {
     "соц",
     "ссср",
     "колекци"
+  ],
+  "skip_url_parts": [
+    "CID339",
+    "CID139"
   ]
 };

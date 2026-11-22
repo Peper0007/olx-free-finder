@@ -94,6 +94,7 @@ function fillForms() {
   $("#s-alo").checked = s.sources.alo.enabled; $("#s-alo-q").value = (s.sources.alo.queries || []).join("\n");
   $("#w-skip").value = (s.skip_words || []).join("\n");
   $("#w-keep").value = (s.keep_words || []).join("\n");
+  $("#w-url").value = (s.skip_url_parts || []).join("\n");
   $("#c-text").value = s.criteria;
   $("#f-score").value = s.min_score; $("#f-score-val").textContent = s.min_score;
   renderBotState();
@@ -122,7 +123,7 @@ async function save(part) {
       },
     };
   } else if (part === "filters") {
-    patch = { skip_words: lines($("#w-skip").value), keep_words: lines($("#w-keep").value) };
+    patch = { skip_words: lines($("#w-skip").value), keep_words: lines($("#w-keep").value), skip_url_parts: lines($("#w-url").value) };
   } else {
     patch = { criteria: $("#c-text").value.trim() || DEFAULTS.criteria };
   }
