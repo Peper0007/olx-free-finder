@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut }
   from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, orderBy, limit, onSnapshot, where }
+import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, orderBy, limit, onSnapshot, where }
   from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { DEFAULTS } from "./defaults.js";
 
@@ -24,6 +24,7 @@ let finds = [];
 let unsubFinds = null, unsubRuns = null, unsubLimits = null;
 let todayOnly = false;
 let limitRuns = [];
+let lastRun = null;
 
 function toast(msg, isError = false) {
   const t = $("#toast");
@@ -59,7 +60,7 @@ onAuthStateChanged(auth, async (user) => {
     toast("Ошибка загрузки настроек: " + (e?.message || e) + " — обнови страницу (Ctrl+F5).", true);
   }
   $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
-  subscribeFinds(); subscribeRuns(); subscribeLimits(); renderGhState();
+  subscribeFinds(); subscribeRuns(); subscribeLimits(); loadGhToken();
 });
 
 // ---------- tabs ----------
@@ -269,21 +270,48 @@ function subscribeRuns() {
         <td>${dur}</td><td class="err small">${esc((r.errors || []).join("; "))}${r.failed_sources?.length ? " нет ответа: " + esc(r.failed_sources.join(", ")) : ""}</td></tr>`;
     }).join("") || `<tr><td colspan="12" class="muted">Запусков пока нет — данные появятся после первого запуска бота с Firestore.</td></tr>`;
     const last = snap.docs[0]?.data();
+    lastRun = last || null; renderLive();
     if (last) $("#btn-run").title = "Последний запуск: " + fmtDate(last.started_at) + " — " + (STATUS_RUN[last.status] || last.status);
   }, (e) => toast("Ошибка загрузки запусков: " + e.message, true));
 }
 
 // ---------- run now (GitHub workflow_dispatch) ----------
-const TOKEN_KEY = "gh_token";
-function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; } }
-function renderGhState() { $("#gh-state").textContent = getToken() ? "токен сохранён" : "токен не задан"; }
-$("#gh-save").onclick = () => {
+// The token lives in Firestore (secrets/github), so every allowed dashboard user shares it.
+// Firestore rules limit reads to the two allowed accounts.
+const TOKEN_KEY = "gh_token"; // legacy per-browser storage, migrated on first load
+let ghToken = "", ghMeta = null;
+const tokenDoc = () => doc(db, "secrets", "github");
+function getToken() { return ghToken; }
+async function loadGhToken() {
+  try {
+    const snap = await getDoc(tokenDoc());
+    if (snap.exists()) { ghToken = snap.data().token || ""; ghMeta = snap.data(); }
+    let legacy = ""; try { legacy = localStorage.getItem(TOKEN_KEY) || ""; } catch {}
+    if (!ghToken && legacy) await saveGhToken(legacy, true);
+    if (legacy) try { localStorage.removeItem(TOKEN_KEY); } catch {}
+  } catch (e) { toast("Не удалось загрузить токен GitHub: " + e.message, true); }
+  renderGhState();
+}
+async function saveGhToken(v, quiet = false) {
+  const meta = { token: v, saved_by: auth.currentUser?.email || "", saved_at: new Date() };
+  await setDoc(tokenDoc(), meta);
+  ghToken = v; ghMeta = meta;
+  if (!quiet) toast("Токен сохранён — кнопка работает у обоих пользователей.");
+}
+function renderGhState() {
+  const when = ghMeta?.saved_at ? fmtDate(ghMeta.saved_at) : "";
+  $("#gh-state").textContent = ghToken ? `токен задан${ghMeta?.saved_by ? " (" + ghMeta.saved_by + (when ? ", " + when : "") + ")" : ""}` : "токен не задан";
+}
+$("#gh-save").onclick = async () => {
   const v = $("#gh-token").value.trim();
   if (!v) return;
-  try { localStorage.setItem(TOKEN_KEY, v); } catch {}
-  $("#gh-token").value = ""; renderGhState(); toast("Токен сохранён в этом браузере.");
+  try { await saveGhToken(v); $("#gh-token").value = ""; renderGhState(); }
+  catch (e) { toast("Не удалось сохранить токен: " + e.message, true); }
 };
-$("#gh-clear").onclick = () => { try { localStorage.removeItem(TOKEN_KEY); } catch {} renderGhState(); };
+$("#gh-clear").onclick = async () => {
+  try { await deleteDoc(tokenDoc()); ghToken = ""; ghMeta = null; renderGhState(); toast("Токен удалён."); }
+  catch (e) { toast("Не удалось удалить токен: " + e.message, true); }
+};
 
 $("#btn-run").onclick = async () => {
   const token = getToken();
@@ -299,7 +327,8 @@ $("#btn-run").onclick = async () => {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
       body: JSON.stringify({ ref: "main", inputs: { mode: "run" } }),
     });
-    if (r.status === 204) toast("Проверка запущена. Через ~1 минуту она появится в «Запусках», находки — по мере оценки.");
+    if (r.status === 401) toast("Токен GitHub недействителен или истёк — создай новый и вставь в «Запуски».", true);
+    else if (r.status === 204) toast("Проверка запущена. Через ~1 минуту она появится в «Запусках», находки — по мере оценки.");
     else toast(`GitHub ответил ${r.status}: ${(await r.text()).slice(0, 200)}`, true);
   } catch (e) { toast("Не удалось запустить: " + e.message, true); }
   finally { setTimeout(() => ($("#btn-run").disabled = false), 5000); }
@@ -410,3 +439,54 @@ function renderLimits() {
     </div>
     <p class="small muted">Не учтены запуски до подключения дашборда, деплои дашборда (~1 мин каждый) и тестовые режимы.</p>`;
 }
+
+// ---------- live status ----------
+const SRC_FULL = { olx: "OLX.bg", bazar: "Bazar.bg", alo: "Alo.bg" };
+function ago(ts) {
+  const m = Math.round((Date.now() - ms(ts)) / 60000);
+  return m < 1 ? "только что" : m < 60 ? `${m} мин назад` : `${Math.floor(m / 60)} ч ${m % 60} мин назад`;
+}
+function nextScheduled(now = new Date()) {
+  if (settings.paused) return null;
+  for (let d = 0; d < 3; d++)
+    for (const h of CRON_UTC_HOURS) {
+      const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + d, h, CRON_MIN));
+      if (t > now) return t;
+    }
+  return null;
+}
+const link = (url, text) => url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(text)}</a>` : esc(text);
+function renderLive() {
+  const el = $("#live");
+  if (!el) return;
+  const r = lastRun;
+  const next = nextScheduled();
+  const nextTxt = settings.paused ? "расписание на паузе" : next ? "следующая по расписанию: " + next.toLocaleString("ru-RU", { weekday: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  if (!r) { el.className = "live"; el.innerHTML = `<span class="dot"></span> Проверок ещё не было · ${nextTxt}`; return; }
+
+  if (r.status === "running") {
+    const p = r.progress || {};
+    const stale = ms(p.at || r.started_at) < Date.now() - 15 * 60000;
+    let what = "запуск…", bar = "";
+    if (p.phase === "collect") {
+      what = `собираю объявления: <b>${SRC_FULL[p.source] || esc(p.source || "")}</b>${p.step ? ` (сайт ${esc(p.step)})` : ""}` +
+        (p.page ? ` · страница ${esc(p.page)}` : "") + (p.url ? ` · ${link(p.url, "открыть")}` : "") +
+        (p.collected ? ` · собрано ${p.collected}` : "");
+    } else if (p.phase === "filter") {
+      what = `отбор: собрано ${p.collected}, новых ${p.new}, мусор ${p.junk}, дубли ${p.duplicates} → ИИ проверит <b>${p.todo}</b> из ${p.candidates}`;
+    } else if (p.phase === "analyze") {
+      const pct = p.todo ? Math.round(p.done / p.todo * 100) : 0;
+      what = `ИИ оценивает <b>${p.done + 1} / ${p.todo}</b> · ${SRC_FULL[p.source] || esc(p.source || "")} · ${link(p.url, "«" + (p.title || "") + "»")} · находок: <b>${p.hits ?? 0}</b>`;
+      bar = `<div class="lim-bar live-bar"><i style="width:${pct}%"></i></div>`;
+    }
+    el.className = "live " + (stale ? "stale" : "run");
+    el.innerHTML = `<span class="dot"></span> ${stale ? "Проверка не отвечает больше 15 мин (возможно, прервана)" : "Идёт проверка"}
+      · начата ${ago(r.started_at)} · ${what}${bar}`;
+    return;
+  }
+  const ok = r.status === "ok";
+  el.className = "live " + (ok ? "" : "fail");
+  el.innerHTML = `<span class="dot"></span> Последняя проверка ${ago(r.finished_at || r.started_at)} — ${ok ? "✔" : "✖ ошибка"}
+    · собрано ${r.collected ?? "—"}, оценено ИИ ${r.analyzed ?? "—"}, находок ${r.sent ?? 0}${r.backlog ? `, в очереди ${r.backlog}` : ""} · ${nextTxt}`;
+}
+setInterval(renderLive, 30000);

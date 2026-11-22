@@ -111,3 +111,13 @@ table.runs { width: 100%; border-collapse: collapse; margin-top: 16px; backgroun
 .lim-rows span:nth-child(even) { text-align: right; font-weight: 600; }
 .lim-answer { background: var(--panel2); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
 .lim-answer b { color: var(--accent); font-size: 18px; }
+
+.live { padding: 8px 20px; background: var(--panel2); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.live b { color: var(--text); }
+.live a { color: var(--accent); }
+.live .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-right: 6px; vertical-align: middle; }
+.live.run .dot { background: var(--accent); animation: pulse 1.2s infinite; }
+.live.run { color: var(--text); }
+.live.stale .dot, .live.fail .dot { background: var(--bad); }
+.live-bar { margin: 6px 0 0; max-width: 600px; }
+@keyframes pulse { 50% { opacity: .3; } }

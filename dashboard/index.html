@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Free Finder — дашборд</title>
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <!-- Login -->
@@ -38,6 +38,7 @@
       <button data-tab="limits">Лимиты</button>
     </nav>
 
+    <div id="live" class="live"></div>
     <main>
       <!-- FINDS -->
       <section id="tab-finds" class="tab">
@@ -132,12 +133,12 @@
       <section id="tab-runs" class="tab hidden">
         <div class="card">
           <h3>Кнопка «Проверить сейчас»</h3>
-          <p class="muted small">Кнопка запускает GitHub Actions. Ей нужен токен GitHub — он хранится <b>только в этом браузере</b>.
+          <p class="muted small">Кнопка запускает GitHub Actions. Ей нужен токен GitHub — он хранится в базе дашборда и <b>общий для обоих пользователей</b>, вводить его нужно один раз.
             Создай его: GitHub → Settings → Developer settings → Personal access tokens → <b>Fine-grained tokens</b> → Generate:
             Repository access — <i>Only select repositories → olx-free-finder</i>, Permissions → Repository → <i>Actions: Read and write</i>.</p>
           <div class="row">
             <input id="gh-token" type="password" placeholder="github_pat_…" autocomplete="off">
-            <button id="gh-save" class="btn">Сохранить в браузере</button>
+            <button id="gh-save" class="btn">Сохранить</button>
             <button id="gh-clear" class="btn ghost">Удалить</button>
             <span id="gh-state" class="muted small"></span>
           </div>
@@ -176,6 +177,6 @@
     </main>
   </div>
 
-  <script type="module" src="app.js?v=5"></script>
+  <script type="module" src="app.js?v=6"></script>
 </body>
 </html>
