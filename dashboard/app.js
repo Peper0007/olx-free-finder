@@ -186,6 +186,14 @@ function fmtDate(ts) {
 }
 function scoreClass(s) { return s >= 7 ? "s-high" : s >= 4 ? "s-mid" : "s-low"; }
 
+function priceLinks(query) {
+  const q = encodeURIComponent(query || "").replace(/%20/g, "+");
+  const a = (href, t) => `<a href="${href}" target="_blank" rel="noopener">${t}</a>`;
+  return [a(`https://www.ebay.de/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1`, "eBay.de продано"),
+          a(`https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1`, "eBay.com продано"),
+          a(`https://www.etsy.com/search?q=${q}`, "Etsy")].join(" · ");
+}
+
 function renderFinds() {
   const minS = +$("#f-score").value, src = $("#f-source").value, st = $("#f-status").value;
   const q = $("#f-search").value.trim().toLowerCase();
@@ -216,6 +224,7 @@ function renderFinds() {
         ${f.items ? `<p>🔎 ${esc(f.items)}</p>` : ""}
         ${f.why ? `<p class="muted">💡 ${esc(f.why)}</p>` : ""}
         <p class="price">💰 ${f.price_etsy || f.price_ebay ? `Etsy <b>${esc(f.price_etsy || "—")}</b> · eBay <b>${esc(f.price_ebay || "—")}</b>` : esc(f.price || "—")}</p>
+        <p class="checks">🔍 ${priceLinks(f.query_en || f.title)}${f.query_en ? ` <span class="muted small">«${esc(f.query_en)}»</span>` : ""}</p>
         <p class="meta">🚚 ${esc(f.pickup || "—")}</p>
         <p class="meta">📍 ${esc(f.location || "?")} · ${SOURCE_NAMES[f.source] || f.source} · ${fmtDate(f.analyzed_at)}</p>
         <div class="status">

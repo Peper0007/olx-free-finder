@@ -127,3 +127,6 @@ table.runs { width: 100%; border-collapse: collapse; margin-top: 16px; backgroun
 .lim-strip b { color: var(--text); }
 .lim-strip .mid b { color: var(--mid); } .lim-strip .bad b { color: var(--bad); }
 .lim-strip a { color: var(--accent); }
+
+.find .checks { font-size: 12px; margin: 4px 0; }
+.find .checks a { color: var(--accent); }
