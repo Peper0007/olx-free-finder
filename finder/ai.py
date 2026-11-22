@@ -14,17 +14,12 @@ from .common import Ad, get, log
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 DEFAULT_MODEL = "gemini-3.5-flash-lite"  # free tier: 15 req/min, 500 req/day
 
-PROMPT = """Ты — опытный перекупщик винтажа из Болгарии. Продаёшь на Etsy и eBay.
+PROMPT_HEAD = """Ты — опытный перекупщик винтажа из Болгарии. Продаёшь на Etsy и eBay.
 Перед тобой бесплатное объявление («подарявам») с болгарского сайта. Посмотри на ВСЕ фото и текст.
 
-Найди вещи, которые реально можно перепродать на Etsy/eBay за деньги, оправдывающие доставку:
-винтаж и антиквариат (20+ лет), соц/советские предметы, фарфор, хрусталь, керамика, бижутерия, часы,
-янтарь/бакелит, значки, монеты, марки, открытки, старые фото, книги/журналы/мануалы, плакаты, эмалированные
-таблички, ретро-техника (фотоаппараты, радио, ресиверы, винил, кассеты), игрушки, предметы декора,
-брендовые или коллекционные вещи, необычные инструменты, иконы, текстиль ручной работы и т.п.
+"""
 
-НЕ интересно: животные, обычная мебель и техника, обычная одежда и обувь, детские вещи, стройматериалы,
-еда, растения, массовые дешёвые вещи, громоздкие предметы без коллекционной ценности.
+PROMPT_AD = """
 
 Объявление:
 Сайт: {source}
@@ -57,17 +52,21 @@ def _image_part(url: str) -> dict | None:
     return {"inline_data": {"mime_type": mime, "data": base64.b64encode(resp.content).decode()}}
 
 
-def analyze(ad: Ad, *, min_interval: float = 5.0) -> dict | None:
+def analyze(ad: Ad, *, model: str | None = None, criteria: str | None = None,
+            min_interval: float = 5.0) -> dict | None:
     """Returns the parsed JSON verdict, or None on failure."""
     global _last_call
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set")
-    model = os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL
+    model = model or os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL
+    if criteria is None:
+        from .remote import DEFAULT_CRITERIA
+        criteria = DEFAULT_CRITERIA
 
     parts: list[dict] = [
         {
-            "text": PROMPT.format(
+            "text": PROMPT_HEAD + criteria + PROMPT_AD.format(
                 source=ad.source,
                 title=ad.title,
                 location=ad.location or "?",

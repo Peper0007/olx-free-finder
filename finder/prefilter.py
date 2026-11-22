@@ -39,6 +39,31 @@ KEEP_WORDS = [
 _KEEP_RE = re.compile("|".join(KEEP_WORDS), re.I)
 
 
+def _compile(words: list[str]) -> re.Pattern | None:
+    good = []
+    for w in words or []:
+        w = (w or "").strip()
+        if not w:
+            continue
+        try:
+            re.compile(w)
+            good.append(w)
+        except re.error:
+            good.append(re.escape(w))  # treat broken regex as plain text
+    return re.compile("|".join(good), re.I) if good else None
+
+
+def configure(skip_words: list[str] | None = None, keep_words: list[str] | None = None) -> None:
+    """Replace the built-in lists (used when the dashboard provides its own)."""
+    global _SKIP_RE, _KEEP_RE
+    if skip_words is not None:
+        _SKIP_RE = _compile(skip_words)
+    if keep_words is not None:
+        _KEEP_RE = _compile(keep_words)
+
+
 def is_junk(ad: Ad) -> bool:
     title = ad.title or ""
-    return bool(_SKIP_RE.search(title)) and not _KEEP_RE.search(title)
+    if _SKIP_RE is None or not _SKIP_RE.search(title):
+        return False
+    return not (_KEEP_RE is not None and _KEEP_RE.search(title))
