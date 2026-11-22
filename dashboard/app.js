@@ -381,6 +381,13 @@ function subscribeLimits() {
 
 function renderLimits() {
   if (!$("#lim-gemini")) return;
+  if (!$("#lim-strip").dataset.bound) {
+    $("#lim-strip").dataset.bound = 1;
+    $("#lim-strip").addEventListener("click", (e) => {
+      if (!e.target.closest("[data-goto]")) return;
+      e.preventDefault(); document.querySelector('.tabs button[data-tab="limits"]').click();
+    });
+  }
   const now = new Date();
   const maxAi = +settings.max_ai_per_run || 100;
   const finished = limitRuns.filter((r) => r.finished_at);
@@ -438,7 +445,15 @@ function renderLimits() {
       <span>Сброс</span><span>${monthEnd.toLocaleDateString("ru-RU")}</span>
     </div>
     <p class="small muted">Не учтены запуски до подключения дашборда, деплои дашборда (~1 мин каждый) и тестовые режимы.</p>`;
+  const pc = (a, b) => (a / b > 0.9 ? "bad" : a / b > 0.7 ? "mid" : "");
+  const strip = $("#lim-strip");
+  if (strip) strip.innerHTML = `
+    <span class="${pc(used, rpd)}">ИИ (Gemini): <b>${used} / ${rpd}</b> за сутки, осталось ${left}, сброс ${nextReset.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
+    <span class="${pc(usedMin, ghLimit)}">GitHub: <b>${usedMin} / ${ghLimit}</b> мин за месяц</span>
+    <span>Ручных запусков можно: <b>${Math.min(manual, ghManual)}</b> сегодня</span>
+    <a href="#" data-goto="limits">подробнее</a>`;
 }
+
 
 // ---------- live status ----------
 const SRC_FULL = { olx: "OLX.bg", bazar: "Bazar.bg", alo: "Alo.bg" };
