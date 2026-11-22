@@ -65,9 +65,9 @@ def parse_listing(html: str) -> list[Ad]:
     return ads
 
 
-def fetch() -> list[Ad]:
+def fetch(queries: list[str] | None = None) -> list[Ad]:
     out: dict[str, Ad] = {}
-    for q in QUERIES:
+    for q in (queries or QUERIES):
         try:
             ads = parse_listing(get(SEARCH_URL.format(q=quote(q)), pause=3).text)
         except Exception as exc:
