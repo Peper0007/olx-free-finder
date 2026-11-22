@@ -39,6 +39,7 @@ PROMPT_AD = """
 }}"""
 
 _last_call = 0.0
+calls = 0  # HTTP requests made to Gemini in this process (counts against the daily quota)
 
 
 def _image_part(url: str) -> dict | None:
@@ -56,7 +57,7 @@ def _image_part(url: str) -> dict | None:
 def analyze(ad: Ad, *, model: str | None = None, criteria: str | None = None,
             min_interval: float = 5.0) -> dict | None:
     """Returns the parsed JSON verdict, or None on failure."""
-    global _last_call
+    global _last_call, calls
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set")
@@ -94,6 +95,7 @@ def analyze(ad: Ad, *, model: str | None = None, criteria: str | None = None,
 
     for attempt in range(3):
         _last_call = time.time()
+        calls += 1
         try:
             resp = requests.post(
                 API_URL.format(model=model),
