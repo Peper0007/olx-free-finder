@@ -52,7 +52,7 @@ def collect() -> tuple[list[Ad], list[str]]:
 
 def run(dry_run: bool) -> int:
     min_score = env_int("MIN_SCORE", 6)
-    max_ai = env_int("MAX_AI_PER_RUN", 45)
+    max_ai = env_int("MAX_AI_PER_RUN", 60)
 
     seen = state.load()
     first_run = not seen
