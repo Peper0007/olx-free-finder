@@ -99,3 +99,15 @@ table.runs { width: 100%; border-collapse: collapse; margin-top: 16px; backgroun
   #user-email { display: none; }
   input[type=search] { min-width: 0; width: 100%; }
 }
+
+.stats div[data-f] { cursor: pointer; transition: border-color .15s; }
+.stats div[data-f]:hover { border-color: var(--muted); }
+.stats div.on { border-color: var(--accent); }
+.lim-big { font-size: 26px; font-weight: 700; margin: 4px 0; }
+.lim-bar { height: 8px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 8px 0 12px; }
+.lim-bar i { display: block; height: 100%; background: var(--good); }
+.lim-bar i.mid { background: var(--mid); } .lim-bar i.bad { background: var(--bad); }
+.lim-rows { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; margin-bottom: 12px; }
+.lim-rows span:nth-child(even) { text-align: right; font-weight: 600; }
+.lim-answer { background: var(--panel2); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.lim-answer b { color: var(--accent); font-size: 18px; }

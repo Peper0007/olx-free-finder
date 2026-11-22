@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut }
   from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, orderBy, limit, onSnapshot }
+import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, orderBy, limit, onSnapshot, where }
   from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
 import { DEFAULTS } from "./defaults.js";
 
@@ -21,7 +21,9 @@ const db = getFirestore(app);
 
 let settings = structuredClone(DEFAULTS);
 let finds = [];
-let unsubFinds = null, unsubRuns = null;
+let unsubFinds = null, unsubRuns = null, unsubLimits = null;
+let todayOnly = false;
+let limitRuns = [];
 
 function toast(msg, isError = false) {
   const t = $("#toast");
@@ -41,7 +43,7 @@ $("#btn-logout").onclick = () => signOut(auth);
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     $("#login").classList.remove("hidden"); $("#app").classList.add("hidden");
-    unsubFinds?.(); unsubRuns?.();
+    unsubFinds?.(); unsubRuns?.(); unsubLimits?.();
     return;
   }
   $("#user-email").textContent = user.email;
@@ -57,7 +59,7 @@ onAuthStateChanged(auth, async (user) => {
     toast("Ошибка загрузки настроек: " + (e?.message || e) + " — обнови страницу (Ctrl+F5).", true);
   }
   $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
-  subscribeFinds(); subscribeRuns(); renderGhState();
+  subscribeFinds(); subscribeRuns(); subscribeLimits(); renderGhState();
 });
 
 // ---------- tabs ----------
@@ -103,6 +105,7 @@ function fillForms() {
   setVal("#w-keep", (s.keep_words || []).join("\n"));
   setVal("#w-url", (s.skip_url_parts || []).join("\n"));
   setVal("#c-text", s.criteria);
+  setVal("#l-rpd", s.gemini_rpd ?? 500); setVal("#l-ghmin", s.gh_minutes ?? 2000);
   setVal("#f-score", s.min_score); if ($("#f-score-val")) $("#f-score-val").textContent = s.min_score;
   renderBotState();
 }
@@ -129,6 +132,8 @@ async function save(part) {
         alo: { enabled: $("#s-alo").checked, queries: lines($("#s-alo-q").value) },
       },
     };
+  } else if (part === "limits") {
+    patch = { gemini_rpd: Math.max(1, +$("#l-rpd").value || 500), gh_minutes: Math.max(1, +$("#l-ghmin").value || 2000) };
   } else if (part === "filters") {
     patch = { skip_words: lines(getVal("#w-skip")), keep_words: lines(getVal("#w-keep")), skip_url_parts: lines(getVal("#w-url")) };
   } else {
@@ -137,7 +142,7 @@ async function save(part) {
   try {
     settings = deepMerge(settings, patch);
     await setDoc(doc(db, "config", "settings"), { ...settings, updated_at: new Date() });
-    renderBotState(); renderFinds();
+    renderBotState(); renderFinds(); renderLimits();
     toast("Сохранено. Бот применит при следующем запуске.");
   } catch (e) { toast("Ошибка сохранения: " + e.message, true); }
 }
@@ -171,7 +176,7 @@ function subscribeFinds() {
 }
 $("#f-limit").onchange = subscribeFinds;
 ["#f-score", "#f-source", "#f-status", "#f-search"].forEach((s) => ($(s).oninput = () => {
-  $("#f-score-val").textContent = $("#f-score").value; renderFinds();
+  todayOnly = false; $("#f-score-val").textContent = $("#f-score").value; renderFinds();
 }));
 
 function fmtDate(ts) {
@@ -184,17 +189,18 @@ function renderFinds() {
   const minS = +$("#f-score").value, src = $("#f-source").value, st = $("#f-status").value;
   const q = $("#f-search").value.trim().toLowerCase();
   const list = finds.filter((f) =>
-    (f.score ?? 0) >= minS && (!src || f.source === src) && (!st || (f.status || "new") === st) &&
+    (f.score ?? 0) >= minS && (!todayOnly || f.analyzed_at?.toDate?.().toDateString() === new Date().toDateString()) && (!src || f.source === src) && (!st || (f.status || "new") === st) &&
     (!q || `${f.title} ${f.location} ${f.items}`.toLowerCase().includes(q)));
 
   const today = new Date().toDateString();
   const hits = finds.filter((f) => (f.score ?? 0) >= settings.min_score);
-  $("#stats").innerHTML = `
-    <div><b>${finds.length}</b><span>оценено (последние)</span></div>
-    <div><b>${hits.length}</b><span>находок ≥ ${settings.min_score}</span></div>
-    <div><b>${finds.filter((f) => f.analyzed_at?.toDate?.().toDateString() === today).length}</b><span>оценено сегодня</span></div>
-    <div><b>${finds.filter((f) => f.status === "interesting").length}</b><span>отмечено «интересно»</span></div>
-    <div><b>${finds.filter((f) => f.status === "taken").length}</b><span>забрал</span></div>`;
+  const tile = (key, n, label) => `<div data-f="${key}" class="${activeTile() === key ? "on" : ""}" title="Показать"><b>${n}</b><span>${label}</span></div>`;
+  $("#stats").innerHTML =
+    tile("all", finds.length, "оценено (последние) — показать все") +
+    tile("hits", hits.length, `находок ≥ ${settings.min_score}`) +
+    tile("today", finds.filter((f) => f.analyzed_at?.toDate?.().toDateString() === today).length, "оценено сегодня") +
+    tile("interesting", finds.filter((f) => f.status === "interesting").length, "отмечено «интересно»") +
+    tile("taken", finds.filter((f) => f.status === "taken").length, "забрал");
 
   $("#finds-empty").classList.toggle("hidden", list.length > 0);
   $("#finds").innerHTML = list.map((f) => `
@@ -217,6 +223,28 @@ function renderFinds() {
       </div>
     </article>`).join("");
 }
+// stat tiles act as quick filters
+function activeTile() {
+  const sc = +$("#f-score").value, st = $("#f-status").value;
+  if ($("#f-source").value || $("#f-search").value.trim()) return "";
+  if (todayOnly) return sc === 0 && !st ? "today" : "";
+  if (sc === 0 && !st) return "all";
+  if (sc === settings.min_score && !st) return "hits";
+  if (sc === 0 && st === "interesting") return "interesting";
+  if (sc === 0 && st === "taken") return "taken";
+  return "";
+}
+$("#stats").addEventListener("click", (e) => {
+  const t = e.target.closest("[data-f]");
+  if (!t) return;
+  const f = t.dataset.f;
+  todayOnly = f === "today";
+  $("#f-score").value = f === "hits" ? settings.min_score : 0;
+  $("#f-score-val").textContent = $("#f-score").value;
+  $("#f-status").value = f === "interesting" || f === "taken" ? f : "";
+  $("#f-source").value = ""; $("#f-search").value = "";
+  renderFinds();
+});
 $("#finds").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-st]");
   if (!b) return;
@@ -276,3 +304,109 @@ $("#btn-run").onclick = async () => {
   } catch (e) { toast("Не удалось запустить: " + e.message, true); }
   finally { setTimeout(() => ($("#btn-run").disabled = false), 5000); }
 };
+
+// ---------- limits ----------
+const PT = "America/Los_Angeles";              // Gemini daily quotas reset at midnight Pacific time
+const CRON_UTC_HOURS = [6, 10, 14, 18], CRON_MIN = 7; // must match .github/workflows/finder.yml
+const ms = (ts) => ts?.toMillis ? ts.toMillis() : ts ? +new Date(ts) : 0;
+
+function tzOffsetMs(date, tz) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric",
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    .formatToParts(date).map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(date / 1000) * 1000;
+}
+function lastPacificMidnight(now) {
+  const local = new Date(+now + tzOffsetMs(now, PT));          // wall clock in PT, expressed as UTC fields
+  const midnightAsUtc = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+  return new Date(midnightAsUtc - tzOffsetMs(new Date(midnightAsUtc), PT));
+}
+function scheduledBetween(from, to) {
+  if (settings.paused) return 0;
+  let n = 0;
+  const d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+  for (; +d < +to; d.setUTCDate(d.getUTCDate() + 1))
+    for (const h of CRON_UTC_HOURS) {
+      const t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h, CRON_MIN);
+      if (t > +from && t < +to) n++;
+    }
+  return n;
+}
+const fmtTime = (d) => d.toLocaleString("ru-RU", { weekday: "short", hour: "2-digit", minute: "2-digit" });
+const runMinutes = (r) => r.finished_at && r.started_at ? Math.max(1, Math.ceil((ms(r.finished_at) - ms(r.started_at)) / 60000)) : 0;
+function bar(used, total) {
+  const p = Math.min(100, Math.round(used / total * 100));
+  return `<div class="lim-bar"><i class="${p > 90 ? "bad" : p > 70 ? "mid" : ""}" style="width:${p}%"></i></div>`;
+}
+
+function subscribeLimits() {
+  unsubLimits?.();
+  const now = new Date();
+  const from = new Date(Math.min(+new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), +lastPacificMidnight(now)));
+  const q = query(collection(db, "runs"), where("started_at", ">=", from), orderBy("started_at", "desc"));
+  unsubLimits = onSnapshot(q, (snap) => { limitRuns = snap.docs.map((d) => d.data()); renderLimits(); },
+    (e) => toast("Ошибка загрузки лимитов: " + e.message, true));
+  clearInterval(subscribeLimits._t);
+  subscribeLimits._t = setInterval(renderLimits, 60000);
+}
+
+function renderLimits() {
+  if (!$("#lim-gemini")) return;
+  const now = new Date();
+  const maxAi = +settings.max_ai_per_run || 100;
+  const finished = limitRuns.filter((r) => r.finished_at);
+  const last = limitRuns[0];
+
+  // ---- Gemini ----
+  const rpd = +settings.gemini_rpd || 500;
+  const reset = lastPacificMidnight(now), nextReset = new Date(+reset + 86400000);
+  const recent = finished.slice(0, 5);
+  const avgCalls = recent.length ? Math.round(recent.reduce((a, r) => a + (r.ai_calls ?? r.analyzed ?? 0), 0) / recent.length) : maxAi;
+  const backlogOn = (last?.backlog ?? 1) > 0;
+  const perRun = Math.max(1, backlogOn ? maxAi : Math.min(maxAi, avgCalls || 1));
+  const today = limitRuns.filter((r) => ms(r.started_at) >= +reset);
+  const used = today.reduce((a, r) => a + (r.status === "running" ? perRun : (r.ai_calls ?? r.analyzed ?? 0)), 0);
+  const left = Math.max(0, rpd - used);
+  const sched = scheduledBetween(now, nextReset);
+  const reserve = sched * perRun;
+  const manual = Math.max(0, Math.floor((left - reserve) / perRun));
+  const manualNoSched = Math.floor(left / perRun);
+  $("#lim-gemini").innerHTML = `
+    <div class="lim-big">${used} / ${rpd}</div>${bar(used, rpd)}
+    <div class="lim-answer">Можно запустить вручную ещё <b>${manual}</b> раз(а) до сброса
+      ${manual === 0 && manualNoSched > 0 ? `<br><span class="small muted">или ${manualNoSched}, если не оставлять запас на запуски по расписанию — тогда они упрутся в лимит</span>` : ""}</div>
+    <div class="lim-rows">
+      <span>Осталось запросов</span><span>${left}</span>
+      <span>Сброс лимита</span><span>${fmtTime(nextReset)}</span>
+      <span>Запусков по расписанию до сброса</span><span>${sched}${settings.paused ? " (пауза)" : ""}</span>
+      <span>Один запуск тратит ~</span><span>${perRun} ${backlogOn ? "(есть очередь — берёт максимум)" : "(очередь пуста)"}</span>
+      <span>Зарезервировано под расписание</span><span>${reserve}</span>
+      <span>Запусков с начала суток</span><span>${today.length}</span>
+    </div>`;
+
+  // ---- GitHub Actions minutes ----
+  const ghLimit = +settings.gh_minutes || 2000;
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  const month = finished.filter((r) => ms(r.started_at) >= +monthStart);
+  const usedMin = month.reduce((a, r) => a + runMinutes(r), 0);
+  const durs = finished.slice(0, 5).map(runMinutes).filter(Boolean);
+  const avgMin = durs.length ? Math.ceil(durs.reduce((a, b) => a + b, 0) / durs.length) : 10;
+  const schedMonth = scheduledBetween(now, monthEnd);
+  const projected = schedMonth * avgMin;
+  const ghLeft = ghLimit - usedMin;
+  const ghManual = Math.max(0, Math.floor((ghLeft - projected) / avgMin));
+  const over = usedMin + projected - ghLimit;
+  $("#lim-gh").innerHTML = `
+    <div class="lim-big">${usedMin} / ${ghLimit} мин</div>${bar(usedMin, ghLimit)}
+    <div class="lim-answer">Можно запустить вручную ещё <b>${ghManual}</b> раз(а) до конца месяца
+      ${over > 0 ? `<br><span class="small err">При текущей длительности запусков расписание до конца месяца не уложится: перерасход ~${over} мин. Запуски станут короче, когда разберётся очередь; иначе уменьши «объявлений за запуск» или страницы OLX.</span>` : ""}</div>
+    <div class="lim-rows">
+      <span>Осталось минут</span><span>${Math.max(0, ghLeft)}</span>
+      <span>Средний запуск (последние 5)</span><span>${avgMin} мин</span>
+      <span>Запусков по расписанию до конца месяца</span><span>${schedMonth}</span>
+      <span>Они займут ~</span><span>${projected} мин</span>
+      <span>Сброс</span><span>${monthEnd.toLocaleDateString("ru-RU")}</span>
+    </div>
+    <p class="small muted">Не учтены запуски до подключения дашборда, деплои дашборда (~1 мин каждый) и тестовые режимы.</p>`;
+}
