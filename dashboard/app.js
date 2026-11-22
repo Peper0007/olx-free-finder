@@ -490,8 +490,9 @@ function renderLive() {
 
   if (r.status === "running") {
     const p = r.progress || {};
-    const stale = ms(p.at || r.started_at) < Date.now() - 15 * 60000;
-    let what = "запуск…", bar = "";
+    // with live progress: silent for 15 min = stuck; without it (older bot code): past the 30-min job timeout
+    const stale = p.at ? ms(p.at) < Date.now() - 15 * 60000 : ms(r.started_at) < Date.now() - 35 * 60000;
+    let what = p.phase ? "запуск…" : "подробности появятся со следующего запуска", bar = "";
     if (p.phase === "collect") {
       what = `собираю объявления: <b>${SRC_FULL[p.source] || esc(p.source || "")}</b>${p.step ? ` (сайт ${esc(p.step)})` : ""}` +
         (p.page ? ` · страница ${esc(p.page)}` : "") + (p.url ? ` · ${link(p.url, "открыть")}` : "") +
@@ -504,7 +505,7 @@ function renderLive() {
       bar = `<div class="lim-bar live-bar"><i style="width:${pct}%"></i></div>`;
     }
     el.className = "live " + (stale ? "stale" : "run");
-    el.innerHTML = `<span class="dot"></span> ${stale ? "Проверка не отвечает больше 15 мин (возможно, прервана)" : "Идёт проверка"}
+    el.innerHTML = `<span class="dot"></span> ${stale ? "Проверка давно не отвечает (возможно, прервана)" : "Идёт проверка"}
       · начата ${ago(r.started_at)} · ${what}${bar}`;
     return;
   }
