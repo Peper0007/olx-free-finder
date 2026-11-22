@@ -208,7 +208,8 @@ function renderFinds() {
         <a class="title" href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.title)}</a>
         ${f.items ? `<p>🔎 ${esc(f.items)}</p>` : ""}
         ${f.why ? `<p class="muted">💡 ${esc(f.why)}</p>` : ""}
-        <p class="meta">💰 ${esc(f.price || "—")} · 🚚 ${esc(f.pickup || "—")}</p>
+        <p class="price">💰 ${f.price_etsy || f.price_ebay ? `Etsy <b>${esc(f.price_etsy || "—")}</b> · eBay <b>${esc(f.price_ebay || "—")}</b>` : esc(f.price || "—")}</p>
+        <p class="meta">🚚 ${esc(f.pickup || "—")}</p>
         <p class="meta">📍 ${esc(f.location || "?")} · ${SOURCE_NAMES[f.source] || f.source} · ${fmtDate(f.analyzed_at)}</p>
         <div class="status">
           ${Object.entries(STATUS).map(([k, v]) => `<button data-id="${esc(f.id)}" data-st="${k}" class="${(f.status || "new") === k ? "on" : ""}">${v}</button>`).join("")}
@@ -235,7 +236,7 @@ function subscribeRuns() {
       const counts = r.counts ? Object.entries(r.counts).map(([k, v]) => `${SOURCE_NAMES[k] || k}: ${v}`).join("<br>") : "";
       return `<tr class="${r.status}">
         <td>${fmtDate(r.started_at)}</td><td>${r.trigger === "manual" ? "вручную" : r.trigger === "schedule" ? "расписание" : esc(r.trigger)}</td>
-        <td>${STATUS_RUN[r.status] || esc(r.status)}</td><td>${counts}</td><td>${r.new ?? ""}</td><td>${r.junk ?? ""}</td>
+        <td>${STATUS_RUN[r.status] || esc(r.status)}</td><td>${counts}</td><td>${r.new ?? ""}</td><td>${r.junk ?? ""}${r.duplicates ? ` <span class="muted small">+${r.duplicates} дубл.</span>` : ""}</td>
         <td>${r.candidates ?? ""}</td><td>${r.analyzed ?? ""}</td><td><b>${r.sent ?? ""}</b></td><td>${r.backlog ?? ""}</td>
         <td>${dur}</td><td class="err small">${esc((r.errors || []).join("; "))}${r.failed_sources?.length ? " нет ответа: " + esc(r.failed_sources.join(", ")) : ""}</td></tr>`;
     }).join("") || `<tr><td colspan="12" class="muted">Запусков пока нет — данные появятся после первого запуска бота с Firestore.</td></tr>`;
