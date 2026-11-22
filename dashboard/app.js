@@ -21,7 +21,8 @@ const db = getFirestore(app);
 
 let settings = structuredClone(DEFAULTS);
 let finds = [];
-let unsubFinds = null, unsubRuns = null, unsubLimits = null;
+let unsubFinds = null, unsubRuns = null, unsubLimits = null, unsubTaken = null;
+let taken = [];
 let todayOnly = false;
 let limitRuns = [];
 let lastRun = null;
@@ -44,7 +45,7 @@ $("#btn-logout").onclick = () => signOut(auth);
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     $("#login").classList.remove("hidden"); $("#app").classList.add("hidden");
-    unsubFinds?.(); unsubRuns?.(); unsubLimits?.();
+    unsubFinds?.(); unsubRuns?.(); unsubLimits?.(); unsubTaken?.();
     return;
   }
   $("#user-email").textContent = user.email;
@@ -178,6 +179,13 @@ function subscribeFinds() {
     finds = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     renderFinds();
   }, (e) => toast("Ошибка загрузки находок: " + e.message, true));
+  // taken items are loaded separately so old ones never fall out of the latest-N window
+  unsubTaken?.();
+  unsubTaken = onSnapshot(query(collection(db, "finds"), where("status", "==", "taken")), (snap) => {
+    taken = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => ms(b.status_at || b.analyzed_at) - ms(a.status_at || a.analyzed_at));
+    renderTaken(); renderFinds();
+  }, (e) => toast("Ошибка загрузки забранных: " + e.message, true));
 }
 $("#f-limit").onchange = subscribeFinds;
 ["#f-score", "#f-source", "#f-status", "#f-search", "#f-platform"].forEach((s) => ($(s).oninput = () => {
@@ -201,7 +209,7 @@ function priceLinks(query) {
 function renderFinds() {
   const minS = +$("#f-score").value, src = $("#f-source").value, st = $("#f-status").value, plat = $("#f-platform").value;
   const q = $("#f-search").value.trim().toLowerCase();
-  const list = finds.filter((f) =>
+  const list = finds.filter((f) => f.status !== "taken" &&
     (f.score ?? 0) >= minS && (!todayOnly || f.analyzed_at?.toDate?.().toDateString() === new Date().toDateString()) && (!src || f.source === src) && (!plat || (plat === "etsy" ? f.etsy_ok === true : f.etsy_ok === false)) && (!st || (f.status || "new") === st) &&
     (!q || `${f.title} ${f.location} ${f.items}`.toLowerCase().includes(q)));
 
@@ -213,17 +221,22 @@ function renderFinds() {
     tile("hits", hits.length, `находок ≥ ${settings.min_score}`) +
     tile("today", finds.filter((f) => f.analyzed_at?.toDate?.().toDateString() === today).length, "оценено сегодня") +
     tile("interesting", finds.filter((f) => f.status === "interesting").length, "отмечено «интересно»") +
-    tile("taken", finds.filter((f) => f.status === "taken").length, "забрал");
+    tile("taken", taken.length, "забрал → вкладка «Забранные»");
 
   $("#finds-empty").classList.toggle("hidden", list.length > 0);
-  $("#finds").innerHTML = list.map((f) => `
-    <article class="find ${f.status === "skip" ? "dim" : ""}">
+  $("#finds").innerHTML = list.map(cardHTML).join("");
+}
+
+function cardHTML(f) {
+  return `
+    <article class="find ${f.status === "skip" ? "dim" : ""} ${f.status === "taken" ? "taken" : ""}">
       <a class="ph" href="${esc(f.url)}" target="_blank" rel="noopener">
         ${f.photos?.[0] ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(f.photos[0])}" alt="">` : `<div class="nophoto">нет фото</div>`}
         <span class="score ${scoreClass(f.score)}">${f.score}/10</span>
         ${f.sent ? `<span class="tg" title="Отправлено в Telegram">✈</span>` : ""}
       </a>
       <div class="body">
+        ${f.status === "taken" ? `<p class="taken-badge">✅ Забрал${f.status_at ? " · " + fmtDate(f.status_at) : ""}</p>` : ""}
         <a class="title" href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.title)}</a>
         ${f.items ? `<p>🔎 ${esc(f.items)}</p>` : ""}
         ${f.why ? `<p class="muted">💡 ${esc(f.why)}</p>` : ""}
@@ -238,7 +251,15 @@ function renderFinds() {
           ${Object.entries(STATUS).map(([k, v]) => `<button data-id="${esc(f.id)}" data-st="${k}" class="${(f.status || "new") === k ? "on" : ""}">${v}</button>`).join("")}
         </div>
       </div>
-    </article>`).join("");
+    </article>`;
+}
+
+function renderTaken() {
+  const n = taken.length;
+  const btn = document.querySelector('.tabs button[data-tab="taken"]');
+  if (btn) btn.textContent = `Забранные${n ? ` (${n})` : ""}`;
+  $("#taken-empty").classList.toggle("hidden", n > 0);
+  $("#taken").innerHTML = taken.map(cardHTML).join("");
 }
 // stat tiles act as quick filters
 function activeTile() {
@@ -248,13 +269,13 @@ function activeTile() {
   if (sc === 0 && !st) return "all";
   if (sc === settings.min_score && !st) return "hits";
   if (sc === 0 && st === "interesting") return "interesting";
-  if (sc === 0 && st === "taken") return "taken";
   return "";
 }
 $("#stats").addEventListener("click", (e) => {
   const t = e.target.closest("[data-f]");
   if (!t) return;
   const f = t.dataset.f;
+  if (f === "taken") { document.querySelector('.tabs button[data-tab="taken"]').click(); return; }
   todayOnly = f === "today";
   $("#f-score").value = f === "hits" ? settings.min_score : 0;
   $("#f-score-val").textContent = $("#f-score").value;
@@ -262,10 +283,10 @@ $("#stats").addEventListener("click", (e) => {
   $("#f-source").value = ""; $("#f-search").value = "";
   renderFinds();
 });
-$("#finds").addEventListener("click", async (e) => {
+async function onCardClick(e) {
   const c = e.target.closest("button[data-copy]");
   if (c) {
-    const f = finds.find((x) => x.id === c.dataset.copy);
+    const f = finds.find((x) => x.id === c.dataset.copy) || taken.find((x) => x.id === c.dataset.copy);
     const text = `Здравейте! Още ли е налично „${(f?.title || "").slice(0, 80)}“? Мога да мина да го взема днес или утре, когато Ви е удобно. Благодаря!`;
     try { await navigator.clipboard.writeText(text); toast("Текст скопирован — вставь его в чат с продавцом."); }
     catch { prompt("Скопируй текст:", text); }
@@ -273,9 +294,15 @@ $("#finds").addEventListener("click", async (e) => {
   }
   const b = e.target.closest("button[data-st]");
   if (!b) return;
-  try { await updateDoc(doc(db, "finds", b.dataset.id), { status: b.dataset.st, status_at: new Date() }); }
+  try {
+    await updateDoc(doc(db, "finds", b.dataset.id), { status: b.dataset.st, status_at: new Date() });
+    if (b.dataset.st === "taken") toast("✅ Перенесено во вкладку «Забранные».");
+    else if (b.closest("#taken")) toast("Вернул в «Находки».");
+  }
   catch (err) { toast("Не удалось сменить статус: " + err.message, true); }
-});
+}
+$("#finds").addEventListener("click", onCardClick);
+$("#taken").addEventListener("click", onCardClick);
 
 // ---------- runs ----------
 const STATUS_RUN = { running: "⏳ идёт", ok: "✔ ок", failed: "✖ ошибка" };

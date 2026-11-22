@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Free Finder — дашборд</title>
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <!-- Login -->
@@ -31,6 +31,7 @@
 
     <nav class="tabs">
       <button data-tab="finds" class="active">Находки</button>
+      <button data-tab="taken">Забранные</button>
       <button data-tab="settings">Настройки</button>
       <button data-tab="filters">Фильтры слов</button>
       <button data-tab="criteria">Критерии ИИ</button>
@@ -52,7 +53,7 @@
           <label>Статус
             <select id="f-status">
               <option value="">все</option><option value="new">новые</option><option value="interesting">интересно</option>
-              <option value="taken">забрал</option><option value="skip">мимо</option>
+              <option value="skip">мимо</option>
             </select>
           </label>
           <label>Площадка
@@ -65,6 +66,14 @@
         </div>
         <div id="finds" class="grid"></div>
         <p id="finds-empty" class="muted hidden">Ничего не найдено по этим фильтрам. Попробуй снизить оценку.</p>
+      </section>
+
+
+      <!-- TAKEN -->
+      <section id="tab-taken" class="tab hidden">
+        <p class="muted small">Сюда попадает всё, что отмечено «забрал». Чтобы вернуть вещь в «Находки», нажми у неё другой статус.</p>
+        <div id="taken" class="grid"></div>
+        <p id="taken-empty" class="muted hidden">Пока ничего не забрано. Нажми «забрал» у находки — она переедет сюда.</p>
       </section>
 
       <!-- SETTINGS -->
@@ -187,6 +196,6 @@
     </main>
   </div>
 
-  <script type="module" src="app.js?v=11"></script>
+  <script type="module" src="app.js?v=12"></script>
 </body>
 </html>
