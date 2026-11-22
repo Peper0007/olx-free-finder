@@ -12,7 +12,7 @@ import requests
 from .common import Ad, get, log
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-DEFAULT_MODEL = "gemini-flash-latest"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"  # free tier: 15 req/min, 500 req/day
 
 PROMPT = """Ты — опытный перекупщик винтажа из Болгарии. Продаёшь на Etsy и eBay.
 Перед тобой бесплатное объявление («подарявам») с болгарского сайта. Посмотри на ВСЕ фото и текст.
@@ -57,7 +57,7 @@ def _image_part(url: str) -> dict | None:
     return {"inline_data": {"mime_type": mime, "data": base64.b64encode(resp.content).decode()}}
 
 
-def analyze(ad: Ad, *, min_interval: float = 7.0) -> dict | None:
+def analyze(ad: Ad, *, min_interval: float = 5.0) -> dict | None:
     """Returns the parsed JSON verdict, or None on failure."""
     global _last_call
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -94,18 +94,25 @@ def analyze(ad: Ad, *, min_interval: float = 7.0) -> dict | None:
 
     for attempt in range(3):
         _last_call = time.time()
-        resp = requests.post(
-            API_URL.format(model=model),
-            params={"key": api_key},
-            json=body,
-            timeout=90,
-        )
+        try:
+            resp = requests.post(
+                API_URL.format(model=model),
+                params={"key": api_key},
+                json=body,
+                timeout=120,
+            )
+        except requests.RequestException as exc:
+            log.warning("Gemini request failed (%s), attempt %s", type(exc).__name__, attempt + 1)
+            time.sleep(5)
+            continue
         if resp.status_code == 429:
             if "PerDay" in resp.text or "per day" in resp.text.lower():
                 raise QuotaExhausted("Gemini daily quota exhausted")
+            log.warning("Gemini 429 (per-minute limit), waiting %ss", 30 * (attempt + 1))
             time.sleep(30 * (attempt + 1))
             continue
         if resp.status_code >= 500:
+            log.warning("Gemini %s, retrying", resp.status_code)
             time.sleep(10)
             continue
         if resp.status_code != 200:
