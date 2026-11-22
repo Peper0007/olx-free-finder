@@ -46,10 +46,19 @@ def parse_listing(html: str) -> list[Ad]:
                 description=clean(a.get("description"))[:1500],
                 photos=photos,
                 posted=(a.get("createdTime") or "")[:16].replace("T", " "),
+                posted_at=_ts(a.get("createdTime")),
                 delivery=delivery,
             )
         )
     return ads
+
+
+def _ts(value) -> float:
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp() if value else 0.0
+    except ValueError:
+        return 0.0
 
 
 def fetch(pages: int = 5) -> list[Ad]:
