@@ -3,6 +3,7 @@ export const DEFAULTS = {
   "paused": false,
   "telegram_enabled": true,
   "min_score": 6,
+  "paid_min_score": 8,
   "max_ai_per_run": 100,
   "learn_from_marks": true,
   "loud_score": 8,
