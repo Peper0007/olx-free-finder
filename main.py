@@ -294,6 +294,10 @@ def run(dry_run: bool) -> int:
                     # cheap paid ads (antiques etc.) score high often: only the best go to Telegram;
                     # «охота» words always go, whatever the score
                     notify = bool(hunt) or (is_hit and (not ad.price or score >= int(settings.get("paid_min_score", 8))))
+                    if notify and not dry_run and remote.already_sent(ad):
+                        log.info("Already sent to Telegram earlier, not repeating: %s", ad.url)
+                        notify = False
+                        verdict["_was_sent"] = True
                     if notify:
                         if dry_run:
                             print("\n" + telegram.format_ad(ad, verdict) + "\n")
@@ -306,7 +310,7 @@ def run(dry_run: bool) -> int:
                                 stats["errors"].append(f"Telegram: {exc}")
                         sent += 1
                     if not dry_run:
-                        remote.save_find(ad, verdict, sent=notify and telegram_on, run_id=run_id)
+                        remote.save_find(ad, verdict, sent=(notify and telegram_on) or bool(verdict.get("_was_sent")), run_id=run_id)
                 report(phase="analyze", done=done, todo=len(todo), source=group[-1].source,
                        title=group[-1].title[:120], url=group[-1].url, hits=sent, calls=ai.calls)
 
