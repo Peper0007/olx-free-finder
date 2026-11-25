@@ -28,6 +28,7 @@ DEFAULTS: dict = {
     "paused": False,
     "telegram_enabled": True,
     "min_score": 6,
+    "paid_min_score": 8,        # Telegram threshold for cheap paid ads (they score high often; avoid flooding the channel)
     "max_ai_per_run": 100,
     "learn_from_marks": True,   # feed the owner's dashboard marks to the AI as examples
     "loud_score": 8,            # Telegram: score >= this arrives with sound, lower ones silently
