@@ -109,6 +109,7 @@ function fillForms() {
   setChk("#s-learn", s.learn_from_marks !== false);
   setVal("#s-loud", s.loud_score ?? 8);
   setVal("#s-model", s.model);
+  setVal("#s-fallback", (s.fallback_models || []).join(", "));
   setVal("#s-batch", s.ai_batch ?? 4);
   setVal("#s-paid-min", s.paid_min_score ?? 8);
   setChk("#s-alive", s.check_alive !== false);
@@ -149,6 +150,7 @@ async function save(part) {
       learn_from_marks: $("#s-learn").checked,
       loud_score: Math.max(0, Math.min(11, +$("#s-loud").value || 8)),
       model: $("#s-model").value.trim() || DEFAULTS.model,
+      fallback_models: $("#s-fallback").value.split(",").map((x) => x.trim()).filter(Boolean),
       ai_batch: Math.max(1, Math.min(6, +$("#s-batch").value || 4)),
       paid_min_score: Math.max(0, Math.min(11, +$("#s-paid-min").value || 8)),
       check_alive: $("#s-alive").checked,
