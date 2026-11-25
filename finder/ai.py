@@ -18,6 +18,8 @@ from .common import Ad, get, log
 
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 DEFAULT_MODEL = "gemini-3.5-flash-lite"  # free tier: 15 req/min, 500 req/day
+# Used when the main model is overloaded (503) or out of its daily quota; each model has its own free quota.
+DEFAULT_FALLBACKS = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
 
 PROMPT_HEAD = """Ты — опытный перекупщик винтажа из Болгарии. Продаёшь на Etsy и eBay.
 Ниже объявления с болгарских сайтов: бесплатные («подарявам») или очень дешёвые. Посмотри на ВСЕ фото и текст.
@@ -65,6 +67,8 @@ PROMPT_TAIL = """
 
 _last_call = 0.0
 calls = 0  # Gemini requests that count against the daily quota (answered ones; 5xx / 429 / network errors don't)
+_dead_models: set[str] = set()  # models out of quota / unavailable in this run
+fallback_used: set[str] = set()  # fallback models that answered for an overloaded main model (for the run log)
 failed_calls = 0  # overloaded (503), rate-limited (429) or network errors — retried, not counted
 _lock = threading.Lock()
 
@@ -122,7 +126,7 @@ def _clean(data: dict) -> dict:
 
 def analyze_batch(ads: list[Ad], *, model: str | None = None, criteria: str | None = None,
                   examples: str = "", home: str = "", min_interval: float = 4.5,
-                  photos_per_ad: int | None = None) -> list[dict | None]:
+                  photos_per_ad: int | None = None, fallbacks: list[str] | None = None) -> list[dict | None]:
     """One Gemini request for several ads. Returns a verdict (or None = retry next run) per ad."""
     if not ads:
         return []
@@ -159,29 +163,47 @@ def analyze_batch(ads: list[Ad], *, model: str | None = None, criteria: str | No
         "generationConfig": {"responseMimeType": "application/json"},
     }
 
-    for attempt in range(3):
+    # main model first, then the fallbacks: when the main one is overloaded (503) or out of its own daily quota,
+    # the same request goes straight to the next model instead of waiting for the next run
+    chain = [m for m in dict.fromkeys([model] + list(fallbacks if fallbacks is not None else DEFAULT_FALLBACKS)) if m]
+    resp = None
+    for attempt in range(len(chain) + 3):
+        alive = [m for m in chain if m not in _dead_models]
+        if not alive:
+            raise QuotaExhausted("Gemini: all models exhausted or unavailable")
+        cur = alive[min(attempt, len(alive) - 1)] if attempt < len(alive) else alive[-1]
         _wait_turn(min_interval)
         try:
-            resp = requests.post(API_URL.format(model=model), params={"key": api_key}, json=body, timeout=90)
+            resp = requests.post(API_URL.format(model=cur), params={"key": api_key}, json=body, timeout=90)
         except requests.RequestException as exc:
             _count(False)
-            log.warning("Gemini request failed (%s), attempt %s", type(exc).__name__, attempt + 1)
+            log.warning("Gemini %s request failed (%s), attempt %s", cur, type(exc).__name__, attempt + 1)
             time.sleep(5)
             continue
         _count(resp.status_code < 500 and resp.status_code != 429)
         if resp.status_code == 429:
             if "PerDay" in resp.text or "per day" in resp.text.lower():
-                raise QuotaExhausted("Gemini daily quota exhausted")
-            log.warning("Gemini 429 (per-minute limit), waiting %ss", 20 * (attempt + 1))
+                log.warning("Gemini %s: daily quota exhausted%s", cur, " — trying fallback model" if len(alive) > 1 else "")
+                _dead_models.add(cur)
+                continue
+            log.warning("Gemini %s 429 (per-minute limit), waiting %ss", cur, 20 * (attempt + 1))
             time.sleep(20 * (attempt + 1))
             continue
         if resp.status_code >= 500:
-            log.warning("Gemini %s, retrying", resp.status_code)
-            time.sleep(8)
+            nxt = alive[alive.index(cur) + 1] if alive.index(cur) + 1 < len(alive) else None
+            if nxt:
+                log.warning("Gemini %s %s (overloaded) → fallback model %s", cur, resp.status_code, nxt)
+                fallback_used.add(nxt)
+            else:
+                log.warning("Gemini %s %s, retrying", cur, resp.status_code)
+                time.sleep(8)
             continue
         if resp.status_code != 200:
-            log.error("Gemini error %s: %s", resp.status_code, resp.text[:500])
+            log.error("Gemini %s error %s: %s", cur, resp.status_code, resp.text[:500])
             if resp.status_code in (400, 403, 404):
+                if cur != model:  # a fallback that doesn't exist / isn't allowed: drop it, don't fail the run
+                    _dead_models.add(cur)
+                    continue
                 raise RuntimeError(f"Gemini request rejected ({resp.status_code}); check model/key")
             return [None] * len(ads)
         try:
