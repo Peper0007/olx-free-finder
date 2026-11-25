@@ -74,6 +74,8 @@ class Ad:
     posted_at: float = 0.0  # unix time of publication if known (OLX), 0 = unknown
     delivery: str = ""     # e.g. "купувача, лично предаване"
     needs_details: bool = False  # True if description/photos should be fetched from the ad page
+    seller: str = ""       # seller id on the site, if known (used to bundle many ads of one seller into a lot)
+    members: list = field(default_factory=list)  # a lot: the separate ads it was built from
     price: float = 0.0     # asking price in EUR; 0 = free («подарявам»)
 
     @property

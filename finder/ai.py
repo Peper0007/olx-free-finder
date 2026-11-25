@@ -64,7 +64,8 @@ PROMPT_TAIL = """
 Всего объявлений: {count}."""
 
 _last_call = 0.0
-calls = 0  # HTTP requests made to Gemini in this process (counts against the daily quota)
+calls = 0  # Gemini requests that count against the daily quota (answered ones; 5xx / 429 / network errors don't)
+failed_calls = 0  # overloaded (503), rate-limited (429) or network errors — retried, not counted
 _lock = threading.Lock()
 
 
@@ -72,14 +73,22 @@ class QuotaExhausted(RuntimeError):
     pass
 
 
+def _count(ok: bool) -> None:
+    global calls, failed_calls
+    with _lock:
+        if ok:
+            calls += 1
+        else:
+            failed_calls += 1
+
+
 def _wait_turn(min_interval: float) -> None:
     """Rate limiter shared by worker threads: request *starts* are spaced min_interval apart,
     so several requests can be in flight while staying under the per-minute limit."""
-    global _last_call, calls
+    global _last_call
     with _lock:
         slot = max(time.time(), _last_call + min_interval)
         _last_call = slot
-        calls += 1
     delay = slot - time.time()
     if delay > 0:
         time.sleep(delay)
@@ -131,7 +140,9 @@ def analyze_batch(ads: list[Ad], *, model: str | None = None, criteria: str | No
         parts.append({"text": PROMPT_AD.format(
             n=n, source=ad.source, title=ad.title, location=ad.location or "?", delivery=ad.delivery or "?",
             price="бесплатно" if not ad.price else f"{ad.price:g} € (платное, дешёвое)",
-            description=(ad.description or "—")[:1200])})
+            description=((f"ЭТО ЛОТ: {len(ad.members)} отдельных объявлений одного продавца (список ниже, фото — по одному "
+                          f"из первых объявлений). Оцени лот ЦЕЛИКОМ: стоит ли забрать всё сразу и за сколько продать всё вместе.\n"
+                          if ad.members else "") + (ad.description or "—"))[:2000])})
         got = 0
         for url in ad.photos[:per_ad]:
             part = _image_part(url)
@@ -153,9 +164,11 @@ def analyze_batch(ads: list[Ad], *, model: str | None = None, criteria: str | No
         try:
             resp = requests.post(API_URL.format(model=model), params={"key": api_key}, json=body, timeout=90)
         except requests.RequestException as exc:
+            _count(False)
             log.warning("Gemini request failed (%s), attempt %s", type(exc).__name__, attempt + 1)
             time.sleep(5)
             continue
+        _count(resp.status_code < 500 and resp.status_code != 429)
         if resp.status_code == 429:
             if "PerDay" in resp.text or "per day" in resp.text.lower():
                 raise QuotaExhausted("Gemini daily quota exhausted")

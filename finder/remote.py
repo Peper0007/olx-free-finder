@@ -51,6 +51,7 @@ DEFAULTS: dict = {
         "bazar": {"enabled": True, "pages": 10},
         "alo": {"enabled": True, "queries": ["подарявам", "подаряваме"]},
     },
+    "hunt_words": [],      # «охота»: always to Telegram with sound (dashboard → «Фильтры слов»)
     "skip_words": None,  # None → built-in list from prefilter.py
     "keep_words": None,
     "skip_url_parts": None,  # None → built-in list (OLX animals/kids categories)
@@ -263,6 +264,11 @@ def fingerprint(ad: Ad) -> str:
     return fp(ad)
 
 
+def _tg_ref(doc_id: str) -> str:
+    from .tgbuttons import ref
+    return ref(doc_id)
+
+
 def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
     db = _client()
     if db is None:
@@ -294,6 +300,9 @@ def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
                 "price_eur": float(ad.price or 0),
                 "fingerprint": fingerprint(ad),
                 "pickup": str(verdict.get("pickup", ""))[:100],
+                "hunt": str(verdict.get("hunt", ""))[:60],
+                "tg_ref": _tg_ref(doc_id),
+                "lot": [{"title": m.title[:120], "url": m.url, "price": float(m.price or 0)} for m in ad.members[:30]],
                 "sent": sent,
                 "analyzed_at": _now(),
                 "run_id": run_id,
