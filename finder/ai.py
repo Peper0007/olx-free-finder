@@ -19,7 +19,7 @@ from .common import Ad, get, log
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 DEFAULT_MODEL = "gemini-3.5-flash-lite"  # free tier: 15 req/min, 500 req/day
 # Used when the main model is overloaded (503) or out of its daily quota; each model has its own free quota.
-DEFAULT_FALLBACKS = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]
+DEFAULT_FALLBACKS = ["gemini-3.1-flash-lite", "gemini-flash-latest"]
 
 PROMPT_HEAD = """Ты — опытный перекупщик винтажа из Болгарии. Продаёшь на Etsy и eBay.
 Ниже объявления с болгарских сайтов: бесплатные («подарявам») или очень дешёвые. Посмотри на ВСЕ фото и текст.
