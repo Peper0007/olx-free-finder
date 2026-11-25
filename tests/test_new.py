@@ -171,6 +171,47 @@ def test_price_conf_shown():
     assert ai._clean({"score": 1})["price_conf"] == "средняя"
 
 
+def test_hunt_words():
+    from finder import prefilter
+    from finder.telegram import format_ad
+    prefilter.configure(hunt_words=["Val Saint Lambert", r"\bleica\b"])
+    ad = Ad("x", "1", "Oude vaas Val Saint Lambert", "u")
+    assert prefilter.hunt_match(ad) == "Val Saint Lambert"
+    assert prefilter.hunt_match(Ad("x", "2", "camera", "u", description="Leica M3 body")) == r"\bleica\b"
+    assert not prefilter.hunt_match(Ad("x", "3", "Leicaster", "u"))
+    assert "Охота" in format_ad(ad, {"score": 2, "hunt": "Val Saint Lambert"})
+    prefilter.configure(hunt_words=[])
+
+
+def test_lots():
+    import main
+    ads = [Ad("2dehands", f"m{i}", f"Strip {i}", f"u{i}", price=2, seller="77", photos=[f"p{i}"]) for i in range(5)]
+    ads += [Ad("2dehands", "m9", "Vaas", "u9", seller="88"), Ad("2dehands", "m10", "Lamp", "u10")]
+    out = main.make_lots(ads, 3)
+    assert len(out) == 3 and out[0].members and len(out[0].members) == 5 and out[0].price == 10
+    assert out[0].photos == ["p0", "p1", "p2", "p3"] and "Strip 4 — 2 €" in out[0].description
+    assert [a.ad_id for a in out[1:]] == ["m9", "m10"]
+
+
+def test_gemini_503_not_counted():
+    os.environ["GEMINI_API_KEY"] = "x"
+    answers = [FakeResp(503, text="overloaded"), gemini_answer([{"n": 1, "score": 5}])]
+    with mock.patch.object(ai.requests, "post", lambda *a, **k: answers.pop(0)), \
+         mock.patch.object(ai, "_image_part", lambda u: None), mock.patch.object(ai.time, "sleep", lambda s: None):
+        before, failed = ai.calls, ai.failed_calls
+        out = ai.analyze_batch([Ad("x", "1", "t", "u")], min_interval=0)
+    assert out[0]["score"] == 5 and ai.calls - before == 1 and ai.failed_calls - failed == 1
+
+
+def test_tg_buttons():
+    from finder import tgbuttons
+    kb = tgbuttons.keyboard("2dehands_m123", chosen="interesting")
+    flat = [b for row in kb["inline_keyboard"] for b in row]
+    assert len(flat) == 6 and flat[0]["text"].startswith("☑️") and flat[0]["callback_data"] == tgbuttons.PROJECT + "|i|2dehands_m123"
+    long_id = "donnerie_" + "x" * 80
+    assert tgbuttons.ref(long_id).startswith("h:") and all(len(b["callback_data"].encode()) <= 64 for row in tgbuttons.keyboard(long_id)["inline_keyboard"] for b in row)
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
