@@ -74,6 +74,8 @@ def format_ad(ad: Ad, verdict: dict | None) -> str:
             lines.append(("🏷 Etsy ✅ винтаж/handmade" if verdict["etsy_ok"] else "🏷 только eBay — для Etsy не подходит") + era)
         if verdict.get("price_etsy") or verdict.get("price_ebay"):
             lines.append(f"💰 Etsy: {e(str(verdict.get('price_etsy', '—')))} · eBay: {e(str(verdict.get('price_ebay', '—')))}")
+            if verdict.get("price_conf") and verdict["price_conf"] != "высокая":
+                lines[-1] += f" <i>(оценка ИИ, уверенность {e(verdict['price_conf'])})</i>"
         elif verdict.get("price"):
             lines.append(f"💰 {e(str(verdict['price']))}")
         if verdict.get("items"):
