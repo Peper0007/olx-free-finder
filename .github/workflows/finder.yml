@@ -2,8 +2,9 @@ name: Free stuff finder
 
 on:
   schedule:
-    # каждый час в :23 (не в :00 — в начале часа GitHub чаще пропускает плановые запуски)
-    - cron: "23 * * * *"
+    # каждые 20 минут: в :07, :27, :47 (не в :00 — в начале часа GitHub чаще пропускает запуски).
+    # Минуты должны совпадать с RUN_MINUTES в main.py и CRON_MINS в dashboard/app.js.
+    - cron: "7,27,47 * * * *"
   workflow_dispatch:
     inputs:
       mode:
