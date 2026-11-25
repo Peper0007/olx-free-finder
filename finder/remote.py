@@ -269,6 +269,18 @@ def _tg_ref(doc_id: str) -> str:
     return ref(doc_id)
 
 
+def already_sent(ad: Ad) -> bool:
+    """True if this ad already went to Telegram (e.g. from an overlapping run)."""
+    db = _client()
+    if db is None:
+        return False
+    try:
+        snap = db.collection("finds").document(ad.key.replace(":", "_")).get()
+        return bool(snap.exists and (snap.to_dict() or {}).get("sent"))
+    except Exception:
+        return False
+
+
 def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
     db = _client()
     if db is None:
