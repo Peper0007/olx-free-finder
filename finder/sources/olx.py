@@ -1,4 +1,4 @@
-"""OLX.bg — the "Подарявам" (free) section.
+"""OLX.bg — the "Подарявам" (free) section, plus cheap ads (≤ N €) in chosen categories.
 
 The listing page embeds all ads as JSON in `window.__PRERENDERED_STATE__`,
 so no HTML scraping and no use of /api/ (which robots.txt disallows).
@@ -8,15 +8,18 @@ from __future__ import annotations
 import json
 import re
 
-from ..common import Ad, clean, get, log
+from ..common import Ad, clean, get, log, stop_when_seen
 
 BASE = "https://www.olx.bg"
 LIST_URL = BASE + "/podaryavam/?page={page}"
+# cheap ads in a category: price filter in EUR, OLX sorts by last bump (newest first)
+CHEAP_URL = BASE + "/{cat}/?search%5Bfilter_float_price%3Ato%5D={max}&page={page}"
 
 _STATE_RE = re.compile(r"window\.__PRERENDERED_STATE__\s*=\s*(\"(?:[^\"\\]|\\.)*\")", re.S)
 
 
-def parse_listing(html: str) -> list[Ad]:
+def parse_listing(html: str, max_price: float | None = None) -> list[Ad]:
+    """Free ads only; with max_price also paid ads costing up to max_price EUR."""
     m = _STATE_RE.search(html)
     if not m:
         raise ValueError("OLX: __PRERENDERED_STATE__ not found (layout changed or blocked)")
@@ -25,8 +28,16 @@ def parse_listing(html: str) -> list[Ad]:
     ads: list[Ad] = []
     for a in raw_ads:
         price = a.get("price") or {}
+        value = 0.0
         if not price.get("free", False):
-            continue  # safety: only free items
+            if max_price is None:
+                continue  # safety: only free items
+            try:
+                value = float(((price.get("regularPrice") or {}).get("value")))
+            except (TypeError, ValueError):
+                continue  # «exchange», «по договаряне» etc.
+            if value <= 0 or value > max_price:
+                continue
         loc = a.get("location") or {}
         location = loc.get("pathName") or ", ".join(
             x for x in (loc.get("regionName"), loc.get("cityName"), loc.get("districtName")) if x
@@ -48,6 +59,7 @@ def parse_listing(html: str) -> list[Ad]:
                 posted=(a.get("createdTime") or "")[:16].replace("T", " "),
                 posted_at=_ts(a.get("createdTime")),
                 delivery=delivery,
+                price=value,
             )
         )
     return ads
@@ -61,17 +73,30 @@ def _ts(value) -> float:
         return 0.0
 
 
-def fetch(pages: int = 5) -> list[Ad]:
-    out: list[Ad] = []
+def _pages(url_tpl: str, pages: int, label: str, **fmt):
     for page in range(1, pages + 1):
         try:
-            html = get(LIST_URL.format(page=page), pause=3).text
-            ads = parse_listing(html)
+            html = get(url_tpl.format(page=page, **fmt), pause=1.5).text
+            ads = parse_listing(html, fmt.get("max"))
         except Exception as exc:  # keep going with what we have
-            log.warning("OLX page %s failed: %s", page, exc)
-            break
-        log.info("OLX page %s: %s free ads", page, len(ads))
+            log.warning("%s page %s failed: %s", label, page, exc)
+            return
+        log.info("%s page %s: %s ads", label, page, len(ads))
         if not ads:
-            break
-        out.extend(ads)
+            return
+        yield ads
+
+
+def fetch(pages: int = 25, seen=None) -> list[Ad]:
+    return stop_when_seen(_pages(LIST_URL, pages, "OLX"), seen, "OLX")
+
+
+def fetch_cheap(categories: list[str], max_eur: float, pages: int = 3, seen=None) -> list[Ad]:
+    out: list[Ad] = []
+    for cat in categories or []:
+        cat = cat.strip().strip("/")
+        if not cat:
+            continue
+        label = f"OLX {cat} ≤{max_eur:g}€"
+        out += stop_when_seen(_pages(CHEAP_URL, pages, label, cat=cat, max=max_eur), seen, label)
     return out

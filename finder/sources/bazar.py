@@ -6,7 +6,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from ..common import Ad, abs_url, clean, get, log
+from ..common import Ad, abs_url, clean, get, log, stop_when_seen
 
 BASE = "https://bazar.bg"
 LIST_URL = BASE + "/obiavi?free=1&sort=date&page={page}"
@@ -68,19 +68,21 @@ def parse_details(html: str, ad: Ad) -> None:
         ad.photos = photos[:4]
 
 
-def fetch(pages: int = 3) -> list[Ad]:
-    out: list[Ad] = []
+def _pages(pages: int):
     for page in range(1, pages + 1):
         try:
-            ads = parse_listing(get(LIST_URL.format(page=page), pause=3).text)
+            ads = parse_listing(get(LIST_URL.format(page=page), pause=1.5).text)
         except Exception as exc:
             log.warning("bazar page %s failed: %s", page, exc)
-            break
+            return
         log.info("bazar page %s: %s free ads", page, len(ads))
         if not ads:
-            break
-        out.extend(ads)
-    return out
+            return
+        yield ads
+
+
+def fetch(pages: int = 10, seen=None) -> list[Ad]:
+    return stop_when_seen(_pages(pages), seen, "Bazar")
 
 
 def enrich(ad: Ad) -> None:
