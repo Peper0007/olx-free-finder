@@ -91,6 +91,8 @@ def test_ai_batch():
             assert False
         except ai.QuotaExhausted:
             pass
+    assert ai.DEFAULT_MODEL in ai._dead_models and set(ai.DEFAULT_FALLBACKS) <= ai._dead_models
+    ai._dead_models.clear()
 
 
 def test_rate_limiter_spacing():
@@ -195,12 +197,31 @@ def test_lots():
 
 def test_gemini_503_not_counted():
     os.environ["GEMINI_API_KEY"] = "x"
+    ai._dead_models.clear(); ai.fallback_used.clear()
     answers = [FakeResp(503, text="overloaded"), gemini_answer([{"n": 1, "score": 5}])]
-    with mock.patch.object(ai.requests, "post", lambda *a, **k: answers.pop(0)), \
+    urls = []
+
+    def post(url, **k):
+        urls.append(url)
+        return answers.pop(0)
+    with mock.patch.object(ai.requests, "post", post), \
          mock.patch.object(ai, "_image_part", lambda u: None), mock.patch.object(ai.time, "sleep", lambda s: None):
         before, failed = ai.calls, ai.failed_calls
         out = ai.analyze_batch([Ad("x", "1", "t", "u")], min_interval=0)
     assert out[0]["score"] == 5 and ai.calls - before == 1 and ai.failed_calls - failed == 1
+    # the retry went straight to the fallback model, without waiting
+    assert ai.DEFAULT_MODEL in urls[0] and ai.DEFAULT_FALLBACKS[0] in urls[1] and ai.DEFAULT_FALLBACKS[0] in ai.fallback_used
+
+
+def test_fallback_missing_model_skipped():
+    os.environ["GEMINI_API_KEY"] = "x"
+    ai._dead_models.clear()
+    answers = [FakeResp(503, text="overloaded"), FakeResp(404, text="model not found"), gemini_answer([{"n": 1, "score": 4}])]
+    with mock.patch.object(ai.requests, "post", lambda *a, **k: answers.pop(0)), \
+         mock.patch.object(ai, "_image_part", lambda u: None), mock.patch.object(ai.time, "sleep", lambda s: None):
+        out = ai.analyze_batch([Ad("x", "1", "t", "u")], min_interval=0)
+    assert out[0]["score"] == 4 and ai.DEFAULT_FALLBACKS[0] in ai._dead_models
+    ai._dead_models.clear()
 
 
 def test_tg_buttons():
