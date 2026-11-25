@@ -123,6 +123,7 @@ function fillForms() {
   setChk("#s-alo", s.sources.alo.enabled); setVal("#s-alo-q", (s.sources.alo.queries || []).join("\n"));
   setVal("#w-skip", (s.skip_words || []).join("\n"));
   setVal("#w-keep", (s.keep_words || []).join("\n"));
+  setVal("#w-hunt", (s.hunt_words || []).join("\n"));
   setVal("#w-url", (s.skip_url_parts || []).join("\n"));
   setVal("#c-text", s.criteria);
   setVal("#l-rpd", s.gemini_rpd ?? 500);
@@ -164,7 +165,8 @@ async function save(part) {
   } else if (part === "limits") {
     patch = { gemini_rpd: Math.max(1, +$("#l-rpd").value || 500) };
   } else if (part === "filters") {
-    patch = { skip_words: lines(getVal("#w-skip")), keep_words: lines(getVal("#w-keep")), skip_url_parts: lines(getVal("#w-url")) };
+    patch = { skip_words: lines(getVal("#w-skip")), keep_words: lines(getVal("#w-keep")), skip_url_parts: lines(getVal("#w-url")),
+              hunt_words: lines(getVal("#w-hunt")) };
   } else {
     patch = { criteria: $("#c-text").value.trim() || DEFAULTS.criteria };
   }
@@ -284,6 +286,9 @@ function cardHTML(f) {
       <div class="body">
         ${f.status in FOLDERS ? `<p class="folder-badge ${f.status}">${f.auto_gone && f.status === "gone" ? "🏃 Объявление снято с сайта (проверил бот)" : FOLDERS[f.status].badge}${f.status_at ? " · " + fmtDate(f.status_at) : ""}</p>` : ""}
         ${f.price_eur > 0 ? `<p class="paid">💶 Платное: <b>${esc(f.price_eur)} €</b></p>` : ""}
+        ${f.lot?.length ? `<details class="lot"><summary>📦 Лот: ${f.lot.length} объявлений одного продавца</summary>${f.lot.map((m) =>
+          `<a href="${esc(m.url)}" target="_blank" rel="noopener">${esc(m.title)}</a>${m.price ? ` — ${esc(m.price)} €` : ""}`).join("<br>")}</details>` : ""}
+        ${f.hunt ? `<p class="hunt">🎯 Охота: «${esc(f.hunt)}»</p>` : ""}
         <a class="title" href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.title)}</a>
         ${f.items ? `<p>🔎 ${esc(f.items)}</p>` : ""}
         ${f.why ? `<p class="muted">💡 ${esc(f.why)}</p>` : ""}
@@ -503,7 +508,7 @@ $("#btn-run").onclick = async () => {
 
 // ---------- limits ----------
 const PT = "America/Los_Angeles";              // Gemini daily quotas reset at midnight Pacific time
-const CRON_UTC_HOURS = [...Array(24).keys()], CRON_MIN = 23; // hourly at :23 — must match .github/workflows/finder.yml
+const CRON_UTC_HOURS = [...Array(24).keys()], CRON_MINS = [7, 27, 47]; // every 20 min — must match .github/workflows/finder.yml
 const ms = (ts) => ts?.toMillis ? ts.toMillis() : ts ? +new Date(ts) : 0;
 
 function tzOffsetMs(date, tz) {
@@ -522,8 +527,8 @@ function scheduledBetween(from, to) {
   let n = 0;
   const d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
   for (; +d < +to; d.setUTCDate(d.getUTCDate() + 1))
-    for (const h of CRON_UTC_HOURS) {
-      const t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h, CRON_MIN);
+    for (const h of CRON_UTC_HOURS) for (const mi of CRON_MINS) {
+      const t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), h, mi);
       if (t > +from && t < +to) n++;
     }
   return n;
@@ -570,7 +575,7 @@ function renderLimits() {
   const lastDone = today.find((r) => r.status !== "running");
   const exhausted = !!lastDone && (lastDone.errors || []).some((x) => /лимит Gemini/i.test(x));
   const left = exhausted ? 0 : Math.max(0, rpd - used);
-  // The bot spreads what's left of the day's quota evenly over the remaining hourly runs
+  // The bot spreads what's left of the day's quota evenly over the remaining scheduled runs (every 20 min)
   // (a manual run takes the same share), so the evening still has quota for fresh ads.
   const sched = scheduledBetween(now, nextReset);
   const batch = +settings.ai_batch || 4;
@@ -607,8 +612,8 @@ function ago(ts) {
 function nextScheduled(now = new Date()) {
   if (settings.paused) return null;
   for (let d = 0; d < 3; d++)
-    for (const h of CRON_UTC_HOURS) {
-      const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + d, h, CRON_MIN));
+    for (const h of CRON_UTC_HOURS) for (const mi of CRON_MINS) {
+      const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + d, h, mi));
       if (t > now) return t;
     }
   return null;

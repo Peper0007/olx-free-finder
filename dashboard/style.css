@@ -158,3 +158,6 @@ table.runs { width: 100%; border-collapse: collapse; margin-top: 16px; backgroun
 .sales-table { margin: 6px 0 4px; }
 .sales-table td:first-child { color: var(--muted); }
 .find .price .conf { font-size: 11px; color: var(--muted); } .find .price .conf.low { color: var(--mid); }
+
+.find .hunt { font-weight: 700; color: #ff9f1c; margin: 0 0 4px; }
+.find .lot { font-size: 12px; margin: 4px 0; } .find .lot summary { cursor: pointer; font-weight: 600; }

@@ -62,6 +62,7 @@ export const DEFAULTS = {
       ]
     }
   },
+  "hunt_words": [],
   "skip_words": [
     "кот(е|ет|енц|к|ешк)",
     "куч(е|ет|енц)",
