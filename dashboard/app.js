@@ -110,6 +110,7 @@ function fillForms() {
   setVal("#s-loud", s.loud_score ?? 8);
   setVal("#s-model", s.model);
   setVal("#s-batch", s.ai_batch ?? 4);
+  setVal("#s-paid-min", s.paid_min_score ?? 8);
   setChk("#s-alive", s.check_alive !== false);
   setChk("#s-digest", s.digest?.enabled !== false); setVal("#s-digest-hour", s.digest?.hour ?? 21);
   const ch = s.sources.olx_cheap || {};
@@ -148,6 +149,7 @@ async function save(part) {
       loud_score: Math.max(0, Math.min(11, +$("#s-loud").value || 8)),
       model: $("#s-model").value.trim() || DEFAULTS.model,
       ai_batch: Math.max(1, Math.min(6, +$("#s-batch").value || 4)),
+      paid_min_score: Math.max(0, Math.min(11, +$("#s-paid-min").value || 8)),
       check_alive: $("#s-alive").checked,
       digest: { enabled: $("#s-digest").checked, hour: Math.max(0, Math.min(23, +$("#s-digest-hour").value || 21)) },
       home: { city: $("#s-home-city").value.trim(), nearby: lines($("#s-home-near").value), only_near: $("#s-home-only").checked },
