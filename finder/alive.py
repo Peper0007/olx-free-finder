@@ -1,6 +1,7 @@
 """«Is the ad still online?» — re-checks open finds so removed ads leave «Находки» by themselves.
 
-OLX answers 410 (removed) / 404; Bazar answers 404 or shows «Обявата не е активна».
+OLX answers 410 (removed) / 404 — its active pages also carry the text «Обявата не е активна»
+(in a translations bundle), so for OLX only the status code counts. Bazar answers 404 or shows that text.
 Anything unclear (network error, 403, captcha) counts as «don't know» and changes nothing.
 """
 from __future__ import annotations
@@ -25,7 +26,7 @@ def is_alive(url: str) -> bool | None:
         return False
     if resp.status_code != 200:
         return None
-    if _GONE_TEXT.search(resp.text):
+    if "bazar.bg" in url and _GONE_TEXT.search(resp.text):
         return False
     return True
 
