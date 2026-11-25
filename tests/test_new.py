@@ -105,11 +105,12 @@ def test_alive():
     class S:
         def __init__(self, status, text=""):
             self.status_code, self.text = status, text
-    cases = {"a": S(410), "b": S(200, "...Обявата не е активна..."), "c": S(200, "ok"), "d": S(403)}
+    cases = {"a": S(410), "https://bazar.bg/b": S(200, "...Обявата не е активна..."), "c": S(200, "ok"), "d": S(403),
+             "https://www.olx.bg/e": S(200, "i18n: Обявата не е активна")}  # OLX active pages carry this text too
     with mock.patch.object(alive, "session") as sess:
         sess.return_value.get.side_effect = lambda url, **kw: cases[url]
         res = {it["url"]: a for it, a in alive.check([{"id": k, "url": k} for k in cases], workers=2)}
-    assert res == {"a": False, "b": False, "c": True, "d": None}
+    assert res == {"a": False, "https://bazar.bg/b": False, "c": True, "d": None, "https://www.olx.bg/e": True}, res
 
 
 def test_full_run():
