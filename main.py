@@ -256,7 +256,8 @@ def run(dry_run: bool) -> int:
                 if ad.source == "bazar" and ad.needs_details:
                     bazar.enrich(ad)
             try:
-                return group, ai.analyze_batch(group, model=settings.get("model"), criteria=settings.get("criteria"),
+                return group, ai.analyze_batch(group, model=settings.get("model"), fallbacks=settings.get("fallback_models"),
+                                               criteria=settings.get("criteria"),
                                                examples=examples, home=hint)
             except ai.QuotaExhausted:
                 stop.set()
@@ -337,7 +338,8 @@ def run(dry_run: bool) -> int:
         if not dry_run:
             state.save(seen)
         backlog = max(0, stats.get("candidates", 0) - analyzed)
-        stats.update(analyzed=analyzed, sent=sent, ai_calls=ai.calls, model=settings.get("model"), backlog=backlog)
+        stats.update(analyzed=analyzed, sent=sent, ai_calls=ai.calls, model=settings.get("model"), backlog=backlog,
+                     fallback_models=sorted(ai.fallback_used), ai_overloaded=ai.failed_calls)
         remote.finish_run(run_id, stats)
         log.info("Done: analyzed %s, sent %s, Gemini requests %s", analyzed, sent, ai.calls)
         if telegram_on and stats["status"] == "ok":
