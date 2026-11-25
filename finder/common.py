@@ -74,10 +74,29 @@ class Ad:
     posted_at: float = 0.0  # unix time of publication if known (OLX), 0 = unknown
     delivery: str = ""     # e.g. "купувача, лично предаване"
     needs_details: bool = False  # True if description/photos should be fetched from the ad page
+    price: float = 0.0     # asking price in EUR; 0 = free («подарявам»)
 
     @property
     def key(self) -> str:
         return f"{self.source}:{self.ad_id}"
+
+
+def stop_when_seen(pages_ads, seen: set | dict | None, label: str, quiet_pages: int = 2):
+    """Listings are sorted newest/bumped first. Once `quiet_pages` pages in a row contain nothing
+    we haven't processed yet, everything below is old too — stop paging (saves minutes per run).
+    `pages_ads` yields the ads of each page; returns all collected ads."""
+    out: list = []
+    quiet = 0
+    for ads in pages_ads:
+        out.extend(ads)
+        if seen is None:
+            continue
+        fresh = [a for a in ads if a.key not in seen]
+        quiet = quiet + 1 if not fresh else 0
+        if quiet >= quiet_pages:
+            log.info("%s: %s pages in a row without new ads — stop paging", label, quiet)
+            break
+    return out
 
 
 def clean(text: str | None) -> str:

@@ -33,8 +33,20 @@ DEFAULTS: dict = {
     "loud_score": 8,            # Telegram: score >= this arrives with sound, lower ones silently
     "model": "gemini-3.5-flash-lite",
     "criteria": DEFAULT_CRITERIA,
+    "ai_batch": 4,              # ads per Gemini request (the daily quota counts requests, not ads)
+    "gemini_rpd": 500,          # Gemini daily request limit; the bot spreads it over the day's runs
+    "check_alive": True,        # re-check open finds and move removed ads to «Забранные другими»
+    "home": {                   # pickup area: these ads (or ones the seller will ship) are analyzed first
+        "city": "София",
+        "nearby": ["Перник", "Божурище", "Костинброд", "Банкя", "Нови Искър", "Своге", "Елин Пелин",
+                   "Ихтиман", "Самоков", "Сливница", "Драгоман", "Годеч", "Горна Малина", "Вакарел"],
+        "only_near": False,     # True = skip far-away ads that are «только лично»
+    },
+    "digest": {"enabled": True, "hour": 21},  # evening summary in Telegram (Sofia time)
     "sources": {
         "olx": {"enabled": True, "pages": 25},
+        "olx_cheap": {"enabled": True, "max_eur": 5, "pages": 3,
+                      "categories": ["antiki-i-kolektsii", "sport-knigi-hobi/muzika"]},
         "bazar": {"enabled": True, "pages": 10},
         "alo": {"enabled": True, "queries": ["подарявам", "подаряваме"]},
     },
@@ -178,7 +190,7 @@ def load_feedback_examples(max_each: int = 12) -> str:
             return 0
 
     docs.sort(key=when, reverse=True)
-    good = [d for d in docs if d.get("status") in ("taken", "interesting", "gone")][:max_each]
+    good = [d for d in docs if d.get("status") in ("taken", "interesting", "gone") and not d.get("auto_gone")][:max_each]
     bad = [d for d in docs if d.get("status") == "skip"][:max_each]
     if not good and not bad:
         return ""
@@ -277,6 +289,7 @@ def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
                 "etsy_ok": bool(verdict.get("etsy_ok", False)),
                 "era": str(verdict.get("era", ""))[:60],
                 "posted_at": ad.posted_at or None,
+                "price_eur": float(ad.price or 0),
                 "fingerprint": fingerprint(ad),
                 "pickup": str(verdict.get("pickup", ""))[:100],
                 "sent": sent,
@@ -287,3 +300,111 @@ def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
         )
     except Exception as exc:
         log.error("Firestore save_find failed: %s", exc)
+
+
+# ---------- quota, liveness, digest ----------
+def _pacific_midnight_utc() -> datetime:
+    """Gemini daily quotas reset at midnight Pacific time."""
+    from zoneinfo import ZoneInfo
+    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    return now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
+def gemini_used_today(exclude_run: str | None = None) -> int | None:
+    """Gemini requests spent since the last quota reset, from the runs log (None = unknown)."""
+    db = _client()
+    if db is None:
+        return None
+    try:
+        used = 0
+        for d in db.collection("runs").where("started_at", ">=", _pacific_midnight_utc()).stream():
+            if d.id == exclude_run:
+                continue
+            r = d.to_dict()
+            if r.get("status") == "running":
+                used += int((r.get("progress") or {}).get("calls") or 0)
+            else:
+                used += int(r.get("ai_calls") or r.get("analyzed") or 0)
+        return used
+    except Exception as exc:
+        log.warning("Firestore quota read failed: %s", exc)
+        return None
+
+
+def load_open_finds(min_score: int, max_n: int = 60, recheck_hours: float = 2.0) -> list[dict]:
+    """Open finds (new / interesting, at/above the threshold, last 30 days) due for an «is it still online?» check."""
+    db = _client()
+    if db is None:
+        return []
+    now = _now().timestamp()
+    out = []
+    try:
+        for d in db.collection("finds").where("score", ">=", min_score).stream():
+            f = d.to_dict()
+            if (f.get("status") or "new") not in ("new", "interesting"):
+                continue
+            t = f.get("analyzed_at")
+            if t is None or now - t.timestamp() > 30 * 86400:
+                continue
+            c = f.get("checked_at")
+            if c is not None and now - c.timestamp() < recheck_hours * 3600:
+                continue
+            out.append({"id": d.id, "url": f.get("url", ""), "source": f.get("source", ""),
+                        "checked": c.timestamp() if c else 0})
+    except Exception as exc:
+        log.warning("Firestore open-finds load failed: %s", exc)
+        return []
+    out.sort(key=lambda x: x["checked"])  # never-checked first
+    return out[:max_n]
+
+
+def mark_checked(doc_id: str, alive: bool) -> None:
+    db = _client()
+    if db is None:
+        return
+    patch = {"checked_at": _now()}
+    if not alive:
+        patch.update(status="gone", status_at=_now(), auto_gone=True)
+    try:
+        db.collection("finds").document(doc_id).set(patch, merge=True)
+    except Exception as exc:
+        log.warning("Firestore mark_checked failed: %s", exc)
+
+
+def finds_since(ts: datetime) -> list[dict]:
+    db = _client()
+    if db is None:
+        return []
+    try:
+        return [d.to_dict() for d in db.collection("finds").where("analyzed_at", ">=", ts).stream()]
+    except Exception as exc:
+        log.warning("Firestore finds_since failed: %s", exc)
+        return []
+
+
+def runs_since(ts: datetime) -> list[dict]:
+    db = _client()
+    if db is None:
+        return []
+    try:
+        return [d.to_dict() for d in db.collection("runs").where("started_at", ">=", ts).stream()]
+    except Exception as exc:
+        log.warning("Firestore runs_since failed: %s", exc)
+        return []
+
+
+def claim_digest(day: str) -> bool:
+    """True once per Sofia day: records that the evening digest for `day` was sent."""
+    db = _client()
+    if db is None:
+        return False
+    ref = db.collection("config").document("state")
+    try:
+        snap = ref.get()
+        if snap.exists and snap.to_dict().get("digest_day") == day:
+            return False
+        ref.set({"digest_day": day, "digest_at": _now()}, merge=True)
+        return True
+    except Exception as exc:
+        log.warning("Firestore digest claim failed: %s", exc)
+        return False

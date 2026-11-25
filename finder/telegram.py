@@ -64,6 +64,8 @@ def seller_message(ad: Ad) -> str:
 def format_ad(ad: Ad, verdict: dict | None) -> str:
     e = html.escape
     lines = [f"<b>{e(ad.title)}</b>"]
+    if ad.price:
+        lines.append(f"💶 Платное: <b>{ad.price:g} €</b> на {SOURCE_NAMES.get(ad.source, ad.source)}")
     if verdict:
         age = age_text(ad)
         lines.append(f"⭐ {verdict.get('score', '?')}/10" + (f" · 🕐 опубликовано {e(age)}" if age else ""))
