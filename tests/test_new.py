@@ -163,6 +163,14 @@ def test_digest_due():
     assert digest.due({"digest": {"enabled": False}}, datetime(2026, 11, 25, 20, 0, tzinfo=timezone.utc)) is None
 
 
+def test_price_conf_shown():
+    from finder.telegram import format_ad
+    data = ai._clean({"score": 7, "price_etsy": "—", "price_ebay": "€5–10", "price_conf": "Низкая (догадка)"})
+    assert data["price_conf"] == "низкая"
+    assert "уверенность низкая" in format_ad(Ad("olx", "1", "Монети", "u"), data)
+    assert ai._clean({"score": 1})["price_conf"] == "средняя"
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
