@@ -286,6 +286,7 @@ def save_find(ad: Ad, verdict: dict, sent: bool, run_id: str | None) -> None:
                 "price": str(verdict.get("price", ""))[:100],
                 "price_etsy": str(verdict.get("price_etsy", ""))[:60],
                 "price_ebay": str(verdict.get("price_ebay", ""))[:60],
+                "price_conf": str(verdict.get("price_conf", ""))[:20],
                 "query_en": str(verdict.get("query_en", ""))[:100],
                 "etsy_ok": bool(verdict.get("etsy_ok", False)),
                 "era": str(verdict.get("era", ""))[:60],
