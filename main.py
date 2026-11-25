@@ -21,7 +21,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from finder import ai, alive, common, digest, geo, prefilter, remote, state, telegram
+from finder import ai, alive, common, digest, geo, prefilter, remote, state, telegram, tgbuttons
 from finder.dedup import fingerprint, title_fingerprint
 from finder.common import Ad, log
 from finder.sources import alo, bazar, olx
@@ -67,16 +67,55 @@ def collect(settings: dict, seen: dict, report=lambda **kw: None) -> tuple[list[
     return list(unique.values()), counts, failed
 
 
-def runs_left_today(now_utc: datetime) -> int:
-    """Scheduled runs (hourly, see finder.yml) until the Gemini quota resets at midnight Pacific."""
+RUN_MINUTES = (7,27,47,)  # scheduled runs every 20 min — must match the cron line in .github/workflows/finder.yml
+
+
+def make_lots(ads: list[Ad], min_size: int = 3, max_items: int = 30) -> list[Ad]:
+    """Many ads of one seller in one run (e.g. 90 comics) → one «lot» ad: one Gemini request instead of dozens,
+    one card in the dashboard, one message in Telegram."""
+    groups: dict[tuple, list[Ad]] = {}
+    for ad in ads:
+        if ad.seller:
+            groups.setdefault((ad.source, ad.seller), []).append(ad)
+    out: list[Ad] = []
+    lots_by_first: dict[str, Ad] = {}
+    for (source, seller), group in groups.items():
+        if len(group) < min_size:
+            continue
+        group = group[:max_items]
+        first = group[0]
+        total = round(sum(a.price for a in group), 2)
+        lines = [f"- {a.title} — {('%g €' % a.price) if a.price else 'бесплатно'}" for a in group]
+        lot = Ad(source=source, ad_id=f"lot{seller}-{first.ad_id}",
+                 title=f"Лот продавца: {len(group)} объявл. — " + "; ".join(a.title for a in group[:3])[:150],
+                 url=first.url, location=first.location, posted=first.posted, posted_at=max(a.posted_at for a in group),
+                 delivery=first.delivery, price=total, seller=seller,
+                 description="\n".join(lines),
+                 photos=[a.photos[0] for a in group if a.photos][:4], members=group)
+        lots_by_first[first.key] = lot
+    if not lots_by_first:
+        return ads
+    in_lot = {m.key for lot in lots_by_first.values() for m in lot.members}
+    for ad in ads:
+        if ad.key in lots_by_first:
+            out.append(lots_by_first[ad.key])
+        elif ad.key not in in_lot:
+            out.append(ad)
+    log.info("Lots: %s sellers with %s+ ads bundled (%s ads → %s lots)",
+             len(lots_by_first), min_size, len(in_lot), len(lots_by_first))
+    return out
+
+
+def runs_left_today(now_utc: datetime, minutes: tuple = RUN_MINUTES) -> int:
+    """Scheduled runs (see finder.yml) left until the Gemini quota resets at midnight Pacific."""
     from zoneinfo import ZoneInfo
     pt = now_utc.astimezone(ZoneInfo("America/Los_Angeles"))
-    return max(0, 23 - pt.hour)
+    return sum(1 for h in range(pt.hour, 24) for m in minutes if (h, m) > (pt.hour, pt.minute))
 
 
 def ai_allowance(settings: dict, run_id: str | None) -> tuple[int, int | None]:
     """How many Gemini requests this run may spend: the day's remaining quota spread evenly over the
-    remaining hourly runs, so fresh ads in the evening still get checked. Returns (requests, left_today)."""
+    remaining scheduled runs, so fresh ads in the evening still get checked. Returns (requests, left_today)."""
     rpd = int(settings.get("gemini_rpd") or 500)
     used = remote.gemini_used_today(exclude_run=run_id)
     if used is None:
@@ -114,7 +153,8 @@ def run(dry_run: bool) -> int:
         log.info("Bot is paused in the dashboard — skipping scheduled run")
         return 0
 
-    prefilter.configure(settings.get("skip_words"), settings.get("keep_words"), settings.get("skip_url_parts"))
+    prefilter.configure(settings.get("skip_words"), settings.get("keep_words"), settings.get("skip_url_parts"),
+                        settings.get("hunt_words") or [])
     min_score = int(settings.get("min_score", 6))
     max_ai = int(settings.get("max_ai_per_run", 100))
     batch = max(1, min(6, int(settings.get("ai_batch", 4))))
@@ -141,6 +181,11 @@ def run(dry_run: bool) -> int:
     common.on_fetch = on_fetch
     try:
         report(force=True, phase="start")
+        if telegram_on:
+            try:  # taps on the status buttons under Telegram messages since the last run
+                stats["tg_marks"] = tgbuttons.process(telegram._call)
+            except Exception as exc:
+                log.warning("Telegram buttons: %s", exc)
         ads, counts, failed = collect(settings, seen, report)
         common.on_fetch = None
         new = [a for a in ads if a.key not in seen]
@@ -166,7 +211,7 @@ def run(dry_run: bool) -> int:
                 seen[ad.key] = now
                 dups += 1
                 continue
-            if home.get("only_near") and not geo.is_near(ad.location, home) and not geo.ships(ad):
+            if home.get("only_near") and not prefilter.hunt_match(ad) and not geo.is_near(ad.location, home) and not geo.ships(ad):
                 seen[ad.key] = now
                 far += 1
                 continue
@@ -182,7 +227,11 @@ def run(dry_run: bool) -> int:
         def priority(ad: Ad) -> tuple:
             fresh = ad.posted_at or (now - 3600 if "днес" in (ad.posted or "").lower() else 0.0)
             reachable = geo.is_near(ad.location, home) or geo.ships(ad)
-            return (reachable, fresh)
+            if prefilter.hunt_match(ad):
+                return (2, reachable, fresh)  # «охота» goes first
+            return (1, reachable, fresh)
+        if settings.get("lots", True):
+            candidates = make_lots(candidates, int(settings.get("lot_min", 3)))
         candidates.sort(key=priority, reverse=True)
 
         examples = remote.load_feedback_examples() if settings.get("learn_from_marks", True) else ""
@@ -234,17 +283,23 @@ def run(dry_run: bool) -> int:
                     analyzed += 1
                     seen[ad.key] = now
                     seen[fingerprint(ad)] = now
+                    for m in ad.members:
+                        seen[m.key] = now
                     score = verdict.get("score", 0)
                     log.info("[%s/10] %s — %s", score, ad.title, ad.url)
+                    hunt = prefilter.hunt_match(ad)
+                    if hunt:
+                        verdict["hunt"] = hunt
                     is_hit = score >= min_score
-                    # cheap paid ads (antiques etc.) score high often: only the best go to Telegram
-                    notify = is_hit and (not ad.price or score >= int(settings.get("paid_min_score", 8)))
+                    # cheap paid ads (antiques etc.) score high often: only the best go to Telegram;
+                    # «охота» words always go, whatever the score
+                    notify = bool(hunt) or (is_hit and (not ad.price or score >= int(settings.get("paid_min_score", 8))))
                     if notify:
                         if dry_run:
                             print("\n" + telegram.format_ad(ad, verdict) + "\n")
                         elif telegram_on:
                             try:
-                                telegram.send_ad(ad, verdict, silent=score < int(settings.get("loud_score", 8)))
+                                telegram.send_ad(ad, verdict, silent=not hunt and score < int(settings.get("loud_score", 8)))
                                 time.sleep(1)
                             except Exception as exc:
                                 log.error("Telegram send failed: %s", exc)
@@ -258,6 +313,8 @@ def run(dry_run: bool) -> int:
         if first_run:
             for ad in candidates:
                 seen.setdefault(ad.key, now)
+                for m in ad.members:
+                    seen.setdefault(m.key, now)
 
         if not dry_run:
             stats["gone_checked"] = check_alive(settings)
@@ -297,7 +354,7 @@ def main() -> int:
         telegram.print_chat_ids()
         return 0
     if args.test:
-        telegram.send_text("✅ Бот работает. Находки будут приходить сюда каждый час.")
+        telegram.send_text("✅ Бот работает. Находки будут приходить сюда, проверка каждые 20 минут.")
         return 0
     return run(args.dry_run)
 
