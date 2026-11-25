@@ -8,7 +8,7 @@ import { DEFAULTS } from "./defaults.js";
 const REPO = "Peper0007/olx-free-finder";
 const WORKFLOW = "finder.yml";
 const SOURCE_NAMES = { olx: "OLX", olx_cheap: "OLX дешёвые", bazar: "Bazar.bg", alo: "Alo.bg" };
-const STATUS = { new: "новое", interesting: "интересно", taken: "забрал", gone: "уже забрали", spam: "спам", skip: "мимо" };
+const STATUS = { new: "новое", interesting: "интересно", taken: "забрал", gone: "уже забрали", spam: "спам", low_profit: "невыгодно", skip: "мимо" };
 // statuses that move a find out of «Находки» into its own tab
 const FOLDERS = {
   taken: { tab: "taken", title: "Забранные", badge: "✅ Забрал", empty: "Пока ничего не забрано. Нажми «забрал» у находки — она переедет сюда." },
@@ -275,7 +275,7 @@ function renderFinds() {
 
 function cardHTML(f) {
   return `
-    <article class="find ${f.status === "skip" ? "dim" : ""} ${f.status in FOLDERS ? "folder-" + f.status : ""}">
+    <article class="find ${f.status === "skip" || f.status === "low_profit" ? "dim" : ""} ${f.status in FOLDERS ? "folder-" + f.status : ""}">
       <a class="ph" href="${esc(f.url)}" target="_blank" rel="noopener">
         ${f.photos?.[0] ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(f.photos[0])}" alt="">` : `<div class="nophoto">нет фото</div>`}
         <span class="score ${scoreClass(f.score)}">${f.score}/10</span>
