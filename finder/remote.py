@@ -44,6 +44,7 @@ DEFAULTS: dict = {
                    "Ихтиман", "Самоков", "Сливница", "Драгоман", "Годеч", "Горна Малина", "Вакарел"],
         "only_near": False,     # True = skip far-away ads that are «только лично»
     },
+    "night": {"enabled": True, "from": 1, "to": 6},  # no scheduled runs between these local hours
     "digest": {"enabled": True, "hour": 21},  # evening summary in Telegram (Sofia time)
     "sources": {
         "olx": {"enabled": True, "pages": 25},
