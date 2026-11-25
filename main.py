@@ -237,7 +237,9 @@ def run(dry_run: bool) -> int:
                     score = verdict.get("score", 0)
                     log.info("[%s/10] %s — %s", score, ad.title, ad.url)
                     is_hit = score >= min_score
-                    if is_hit:
+                    # cheap paid ads (antiques etc.) score high often: only the best go to Telegram
+                    notify = is_hit and (not ad.price or score >= int(settings.get("paid_min_score", 8)))
+                    if notify:
                         if dry_run:
                             print("\n" + telegram.format_ad(ad, verdict) + "\n")
                         elif telegram_on:
@@ -249,7 +251,7 @@ def run(dry_run: bool) -> int:
                                 stats["errors"].append(f"Telegram: {exc}")
                         sent += 1
                     if not dry_run:
-                        remote.save_find(ad, verdict, sent=is_hit and telegram_on, run_id=run_id)
+                        remote.save_find(ad, verdict, sent=notify and telegram_on, run_id=run_id)
                 report(phase="analyze", done=done, todo=len(todo), source=group[-1].source,
                        title=group[-1].title[:120], url=group[-1].url, hits=sent, calls=ai.calls)
 
