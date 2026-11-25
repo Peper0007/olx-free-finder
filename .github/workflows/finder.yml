@@ -30,6 +30,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+        with:
+          # the newest main, not the commit at trigger time: a run that waited in the queue must see
+          # the seen.json saved by the run before it, or it re-sends the same finds
+          ref: main
 
       - uses: actions/setup-python@v6
         with:
